@@ -11,7 +11,24 @@ Both 1:1 chats and group chats are supported. In group chats, each character get
 
 _This is an independent extension for SillyTavern and is not affiliated with the SillyTavern development team._
 
-![Smart Memory settings panel](https://raw.githubusercontent.com/senjinthedragon/Smart-Memory/main/assets/smart-memory.webp)
+<table>
+  <tr>
+    <td align="center">
+      <img src="https://raw.githubusercontent.com/senjinthedragon/Smart-Memory/dev/assets/smart-memory1.webp" alt="Smart Memory extension panel" /><br/>
+      <em>The extension panel</em>
+    </td>
+    <td align="center">
+      <img src="https://raw.githubusercontent.com/senjinthedragon/Smart-Memory/dev/assets/smart-memory2.webp" alt="Session memory list" /><br/>
+      <em>Session memories</em>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center">
+      <img src="https://raw.githubusercontent.com/senjinthedragon/Smart-Memory/dev/assets/smart-memory3.webp" alt="Entity and memory force graph" /><br/>
+      <em>Entity and memory graph - hover any node to inspect it</em>
+    </td>
+  </tr>
+</table>
 
 ## ☕ Support the Developer
 
