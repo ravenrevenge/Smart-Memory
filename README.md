@@ -154,21 +154,6 @@ All three follow Smart Memory's structured output reliably. Smart Memory's promp
 
 ## Manual Operations
 
-### Read-only Mode
-
-The **Read-only mode - protect character memories** toggle sits just below the chat action buttons. When it is on, the character arrives with all their memories and behaves completely normally - but nothing from this chat gets written back to their permanent history. No new long-term memories, no new arcs, no canon or profile updates.
-
-Use it to safely explore a risky scene before deciding whether to commit it to the character's history. Or for a completely consequence-free session where nothing changes permanently. When you turn it off, their memories are exactly as you left them before the session.
-
-When you turn read-only off, a dialog asks what to do with the session:
-
-- **Commit** - keeps everything. Session memories are preserved and Smart Memory runs full extraction on the window - long-term memories, arcs, and profiles are built as if read-only had never been active. The messages stay visible.
-- **Discard** - throws everything away. Session memories are purged and the messages from the read-only window are hidden from the AI so they can never influence future extraction passes.
-
-You can toggle read-only on and off multiple times in the same chat; each window is handled independently.
-
-**Using read-only with checkpoints and branches:** SillyTavern's checkpoint and branch features save the chat up to a specific point as a new file. Smart Memory's long-term memories are shared across all chats with the same character - they do not roll back if you switch to an older checkpoint or branch. If you plan to explore alternative story paths this way, enable read-only mode first. Smart Memory will warn you with a notification if you create a checkpoint or branch without it active.
-
 ### Memorize Chat
 
 Reads the full chat history and builds memories from it - long-term facts, session details, scene history, story arcs, summary, and profiles. Use this to bring Smart Memory up to speed on an existing chat, or to build up a character's long-term memories from older sessions.
@@ -192,6 +177,21 @@ Clears all Smart Memory context for the current chat - summary, session memories
 Clears everything for a clean slate - long-term memories, canon, and entity registry for the current character, plus all chat-scoped tiers (summary, session memories, scene history, arcs, profiles). The AI will begin building fresh memories from the next message onward. Asks for confirmation before proceeding - this cannot be undone.
 
 To prevent a specific chat from contributing to long-term memory at all, use **Read-only mode** instead.
+
+### Read-only Mode
+
+The **Read-only mode - protect character memories** toggle sits just below the chat action buttons. When it is on, the character arrives with all their memories and behaves completely normally - but nothing from this chat gets written back to their permanent history. No new long-term memories, no new arcs, no canon or profile updates.
+
+Use it to safely explore a risky scene before deciding whether to commit it to the character's history. Or for a completely consequence-free session where nothing changes permanently. When you turn it off, their memories are exactly as you left them before the session.
+
+When you turn read-only off, a dialog asks what to do with the session:
+
+- **Commit** - keeps everything. Session memories are preserved and Smart Memory runs full extraction on the window - long-term memories, arcs, and profiles are built as if read-only had never been active. The messages stay visible.
+- **Discard** - throws everything away. Session memories are purged and the messages from the read-only window are hidden from the AI so they can never influence future extraction passes.
+
+You can toggle read-only on and off multiple times in the same chat; each window is handled independently.
+
+**Using read-only with checkpoints and branches:** SillyTavern's checkpoint and branch features save the chat up to a specific point as a new file. Smart Memory's long-term memories are shared across all chats with the same character - they do not roll back if you switch to an older checkpoint or branch. If you plan to explore alternative story paths this way, enable read-only mode first. Smart Memory will warn you with a notification if you create a checkpoint or branch without it active.
 
 ### Per-tier Extract Buttons
 
