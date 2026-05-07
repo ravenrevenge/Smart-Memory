@@ -54,6 +54,10 @@ Restart SillyTavern. **Smart Memory** will appear in your Extensions panel.
 
 Smart Memory runs several memory systems in the background, each focused on a different slice of your story's history.
 
+### Bringing Existing Chats In
+
+Already have chats that predate Smart Memory? The [Manual Operations](#manual-operations) section covers the tools for this - **Memorize Chat** reads through an existing chat and builds the full set of memories, scene history, arcs, and summary from it. Run it on any older chat to bring that character's history into the system.
+
 ### Token Usage Display
 
 A small bar in the settings panel shows how many tokens each memory tier is currently using in the AI's context. It updates after every response so you can see at a glance whether Smart Memory is taking up a sensible amount of your context.
