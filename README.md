@@ -62,6 +62,10 @@ Smart Memory needs a language model to do its work - summarizing, extracting fac
 
 Embeddings let Smart Memory compare memories by meaning rather than exact wording, which catches far more duplicates and keeps your memory lists clean. If you already use SillyTavern's Vector Storage with Ollama, you likely have `nomic-embed-text` installed and nothing extra is needed - just make sure **Use semantic embeddings** is enabled in the **Configuration** section. If not, see [Memory Deduplication](#memory-deduplication) for setup instructions.
 
+### 3. Leave the memory context budget alone (for now)
+
+The default **Memory context budget** in simple mode is 3100 tokens - the combined total of all memory tiers at their default sizes. This number was chosen to work well with the recommended Qwen3 model. If you reduce it, one or more tiers will start getting trimmed or cut off entirely to fit the lower limit, which may noticeably affect quality. Leave it at the default until you have a feel for how Smart Memory works in your setup, then adjust carefully in small steps if needed.
+
 That's it - Smart Memory will start building memories automatically from your next chat.
 
 ## What It Does
