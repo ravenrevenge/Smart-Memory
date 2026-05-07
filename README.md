@@ -54,6 +54,10 @@ Restart SillyTavern. **Smart Memory** will appear in your Extensions panel.
 
 Smart Memory runs several memory systems in the background, each focused on a different slice of your story's history.
 
+### Token Usage Display
+
+A small bar in the settings panel shows how many tokens each memory tier is currently using in the AI's context. It updates after every response so you can see at a glance whether Smart Memory is taking up a sensible amount of your context.
+
 ### Long-term Memory - Persistent Facts
 
 Facts, relationship history, preferences, and significant events are extracted from your chats and saved for each character. These memories survive across all sessions - when you open a new chat with a character, everything they have learned is already there waiting.
@@ -118,10 +122,6 @@ On **Profile B** (hosted models), the continuity check runs automatically after 
 
 > **Note:** The continuity checker is only as good as the model doing the checking, and it only knows what is stored in Smart Memory - not what is on the character card by heart. Think of it as a sanity check, not a guarantee.
 
-### Token Usage Display
-
-A small bar in the settings panel shows how many tokens each memory tier is currently using in the AI's context. It updates after every response so you can see at a glance whether Smart Memory is taking up a sensible amount of your context.
-
 ---
 
 ## Recommended Setup
@@ -149,6 +149,87 @@ For local Ollama setups with limited VRAM (8GB or less), three models have been 
 **`gemma3:4b`** (3.3 GB) - lightest recommended option. Matches qwen3-vl on most extractions; occasionally files some long-term-relevant details under session memory on very long chats. Use if 4 GB is your hard limit.
 
 All three follow Smart Memory's structured output reliably. Smart Memory's prompts are longer than typical chat prompts - a model that works fine for roleplay may still struggle here if the combined prompt length exceeds its effective context window. If you get empty or garbled extraction output with a different model, context overflow is the most likely cause.
+
+---
+
+## Manual Operations
+
+### Read-only Mode
+
+The **Read-only mode - protect character memories** toggle sits just below the chat action buttons. When it is on, the character arrives with all their memories and behaves completely normally - but nothing from this chat gets written back to their permanent history. No new long-term memories, no new arcs, no canon or profile updates.
+
+Use it to safely explore a risky scene before deciding whether to commit it to the character's history. Or for a completely consequence-free session where nothing changes permanently. When you turn it off, their memories are exactly as you left them before the session.
+
+When you turn read-only off, a dialog asks what to do with the session:
+
+- **Commit** - keeps everything. Session memories are preserved and Smart Memory runs full extraction on the window - long-term memories, arcs, and profiles are built as if read-only had never been active. The messages stay visible.
+- **Discard** - throws everything away. Session memories are purged and the messages from the read-only window are hidden from the AI so they can never influence future extraction passes.
+
+You can toggle read-only on and off multiple times in the same chat; each window is handled independently.
+
+**Using read-only with checkpoints and branches:** SillyTavern's checkpoint and branch features save the chat up to a specific point as a new file. Smart Memory's long-term memories are shared across all chats with the same character - they do not roll back if you switch to an older checkpoint or branch. If you plan to explore alternative story paths this way, enable read-only mode first. Smart Memory will warn you with a notification if you create a checkpoint or branch without it active.
+
+### Memorize Chat
+
+Reads the full chat history and builds memories from it - long-term facts, session details, scene history, story arcs, summary, and profiles. Use this to bring Smart Memory up to speed on an existing chat, or to build up a character's long-term memories from older sessions.
+
+In group chats, Memorize Chat processes all active group members - not just the one currently selected. Each character gets their own pass through the messages, their own memories, and their own profiles at the end.
+
+A **Cancel** button appears during processing. Cancelling stops cleanly between chunks - anything processed so far is saved.
+
+If memories already exist for one or more characters, a confirmation prompt appears before processing begins. Running Memorize Chat repeatedly on the same chat can introduce near-duplicate entries. Use **Forget This Chat** first if you want a clean re-run.
+
+Only accepted messages are processed - swiped alternatives are ignored.
+
+To build long-term memories from multiple older chats, open each one and run Memorize Chat. Memories accumulate and deduplicate automatically. Skip any chats you would rather not include.
+
+### Forget This Chat
+
+Clears all Smart Memory context for the current chat - summary, session memories, scene history, story arcs, profiles, and the session entity list. Long-term memories and the persistent entity registry are not touched. Useful before a Memorize Chat run to re-derive everything cleanly from scratch.
+
+### Fresh Start
+
+Clears everything for a clean slate - long-term memories, canon, and entity registry for the current character, plus all chat-scoped tiers (summary, session memories, scene history, arcs, profiles). The AI will begin building fresh memories from the next message onward. Asks for confirmation before proceeding - this cannot be undone.
+
+To prevent a specific chat from contributing to long-term memory at all, use **Read-only mode** instead.
+
+### Per-tier Extract Buttons
+
+Each memory tier has its own **Extract Now** or **Extract** button that processes a recent window of messages - not the full chat. Useful for pulling in the latest exchanges outside the automatic schedule.
+
+| Button                | Window                           |
+| --------------------- | -------------------------------- |
+| Long-term Extract Now | Last 20 messages                 |
+| Session Extract Now   | Last 40 messages                 |
+| Extract Arcs Now      | Last 100 messages                |
+| Extract Scene         | Scene buffer or last 40 messages |
+
+For the full chat backlog, use **Memorize Chat** instead.
+
+### Other Per-tier Buttons
+
+- **Summarize Now** - forces a short-term summary right now, ignoring the threshold
+- **Generate Canon** - synthesizes a prose narrative from resolved arc summaries and high-importance facts. Requires at least one resolved arc summary. On Profile B this runs automatically after each arc closes. Canon is stored at the character level and survives across chats - cleared by Fresh Start and the Long-term Memory Clear button. The canon textarea is also editable directly
+- **Generate Recap Now** - generates and shows a recap popup on demand
+- **Check Last Response** - runs the continuity check against the last AI response
+- **Regenerate Profiles Now** - regenerates character and world profiles immediately
+- **Clear** buttons on each tier - remove all stored data for that tier
+
+### Editing and Adding Memories Manually
+
+Every entry in the long-term memory, session memory, and story arc lists has action buttons:
+
+- **Pencil (edit)** - replaces the entry with an inline text editor. Edit the content and click **Save**, or **Cancel** to discard changes. Not shown on retired memories.
+- **Trash / Checkmark (delete/resolve)** - removes the entry immediately. For story arcs the button is a checkmark to indicate resolving the thread rather than discarding it.
+- **Pin (story arcs only)** - marks the arc as persistent so it carries into future chats. The pin icon turns gold and the arc gets a gold left border when pinned. Click again to unpin.
+- **Jump to source** - scrolls the chat to the message window the memory was extracted from. Shown on session memories whenever provenance is available, and on long-term memories when the memory was extracted from the current chat.
+
+Below each list an **Add** form lets you insert a new entry manually:
+
+- For long-term and session memories, a color-coded type picker lets you choose the type before adding. Each type is shown in its badge color so you can see what you are picking.
+- For story arcs, just type the thread and click **Add**.
+
+Manual edits take effect immediately and are added to the prompt on the next message.
 
 ---
 
@@ -327,89 +408,6 @@ A collapsible **Entity Registry** panel in the settings shows all tracked entiti
 - A **trash button** to remove an entity entirely, which also cleans up all references to it from stored memories
 
 A **View Graph** button opens a full-screen, force-directed canvas of your character's entire memory network. Entity nodes (larger, coloured by type) are connected to the memories that reference them. Where one memory has replaced another, a directed arrow shows the supersession chain so you can see exactly what was retired and what replaced it. The graph supports pan, zoom, node dragging, click-to-highlight neighbours, and hover tooltips with full memory content. Filters for session memories and retired memories can be toggled on and off without closing the graph. The graph follows your active SillyTavern theme automatically.
-
----
-
-## Manual Operations
-
-All manual operations are in the **Configuration** section at the top of the panel, or inside their respective tier sections.
-
-### Read-only Mode
-
-The **Read-only mode - protect character memories** toggle sits just below the chat action buttons. When it is on, the character arrives with all their memories and behaves completely normally - but nothing from this chat gets written back to their permanent history. No new long-term memories, no new arcs, no canon or profile updates.
-
-Use it to safely explore a risky scene before deciding whether to commit it to the character's history. Or for a completely consequence-free session where nothing changes permanently. When you turn it off, their memories are exactly as you left them before the session.
-
-When you turn read-only off, a dialog asks what to do with the session:
-
-- **Commit** - keeps everything. Session memories are preserved and Smart Memory runs full extraction on the window - long-term memories, arcs, and profiles are built as if read-only had never been active. The messages stay visible.
-- **Discard** - throws everything away. Session memories are purged and the messages from the read-only window are hidden from the AI so they can never influence future extraction passes.
-
-You can toggle read-only on and off multiple times in the same chat; each window is handled independently.
-
-**Using read-only with checkpoints and branches:** SillyTavern's checkpoint and branch features save the chat up to a specific point as a new file. Smart Memory's long-term memories are shared across all chats with the same character - they do not roll back if you switch to an older checkpoint or branch. If you plan to explore alternative story paths this way, enable read-only mode first. Smart Memory will warn you with a notification if you create a checkpoint or branch without it active.
-
-### Memorize Chat
-
-Reads the full chat history and builds memories from it - long-term facts, session details, scene history, story arcs, summary, and profiles. Use this to bring Smart Memory up to speed on an existing chat, or to build up a character's long-term memories from older sessions.
-
-In group chats, Memorize Chat processes all active group members - not just the one currently selected. Each character gets their own pass through the messages, their own memories, and their own profiles at the end.
-
-A **Cancel** button appears during processing. Cancelling stops cleanly between chunks - anything processed so far is saved.
-
-If memories already exist for one or more characters, a confirmation prompt appears before processing begins. Running Memorize Chat repeatedly on the same chat can introduce near-duplicate entries. Use **Forget This Chat** first if you want a clean re-run.
-
-Only accepted messages are processed - swiped alternatives are ignored.
-
-To build long-term memories from multiple older chats, open each one and run Memorize Chat. Memories accumulate and deduplicate automatically. Skip any chats you would rather not include.
-
-### Forget This Chat
-
-Clears all Smart Memory context for the current chat - summary, session memories, scene history, story arcs, profiles, and the session entity list. Long-term memories and the persistent entity registry are not touched. Useful before a Memorize Chat run to re-derive everything cleanly from scratch.
-
-### Fresh Start
-
-Clears everything for a clean slate - long-term memories, canon, and entity registry for the current character, plus all chat-scoped tiers (summary, session memories, scene history, arcs, profiles). The AI will begin building fresh memories from the next message onward. Asks for confirmation before proceeding - this cannot be undone.
-
-To prevent a specific chat from contributing to long-term memory at all, use **Read-only mode** instead.
-
-### Per-tier Extract Buttons
-
-Each memory tier has its own **Extract Now** or **Extract** button that processes a recent window of messages - not the full chat. Useful for pulling in the latest exchanges outside the automatic schedule.
-
-| Button                | Window                           |
-| --------------------- | -------------------------------- |
-| Long-term Extract Now | Last 20 messages                 |
-| Session Extract Now   | Last 40 messages                 |
-| Extract Arcs Now      | Last 100 messages                |
-| Extract Scene         | Scene buffer or last 40 messages |
-
-For the full chat backlog, use **Memorize Chat** instead.
-
-### Other Per-tier Buttons
-
-- **Summarize Now** - forces a short-term summary right now, ignoring the threshold
-- **Generate Canon** - synthesizes a prose narrative from resolved arc summaries and high-importance facts. Requires at least one resolved arc summary. On Profile B this runs automatically after each arc closes. Canon is stored at the character level and survives across chats - cleared by Fresh Start and the Long-term Memory Clear button. The canon textarea is also editable directly
-- **Generate Recap Now** - generates and shows a recap popup on demand
-- **Check Last Response** - runs the continuity check against the last AI response
-- **Regenerate Profiles Now** - regenerates character and world profiles immediately
-- **Clear** buttons on each tier - remove all stored data for that tier
-
-### Editing and Adding Memories Manually
-
-Every entry in the long-term memory, session memory, and story arc lists has action buttons:
-
-- **Pencil (edit)** - replaces the entry with an inline text editor. Edit the content and click **Save**, or **Cancel** to discard changes. Not shown on retired memories.
-- **Trash / Checkmark (delete/resolve)** - removes the entry immediately. For story arcs the button is a checkmark to indicate resolving the thread rather than discarding it.
-- **Pin (story arcs only)** - marks the arc as persistent so it carries into future chats. The pin icon turns gold and the arc gets a gold left border when pinned. Click again to unpin.
-- **Jump to source** - scrolls the chat to the message window the memory was extracted from. Shown on session memories whenever provenance is available, and on long-term memories when the memory was extracted from the current chat.
-
-Below each list an **Add** form lets you insert a new entry manually:
-
-- For long-term and session memories, a color-coded type picker lets you choose the type before adding. Each type is shown in its badge color so you can see what you are picking.
-- For story arcs, just type the thread and click **Add**.
-
-Manual edits take effect immediately and are added to the prompt on the next message.
 
 ---
 
