@@ -210,7 +210,7 @@ ollama pull nomic-embed-text
 | Context threshold         | 80%                          | Start summarizing when the context reaches this percentage of the model's limit  |
 | Summary response length   | 2000 tokens                  | How long the summary can be - also acts as the cap on what gets added to context |
 | Injection template        | `Story so far:\n{{summary}}` | The wrapper text around the summary                                              |
-| Injection position        | In-prompt                    | Where in the prompt the summary appears                                          |
+| Injection position        | After Main Prompt                    | Where in the prompt the summary appears                                          |
 
 ### Canon
 
@@ -219,7 +219,7 @@ ollama pull nomic-embed-text
 | Enable canon       | On                              | Add canon to context and allow auto-regeneration. Turning this off suppresses both |
 | Injection budget   | 800 tokens                      | Canon text is trimmed from the end if it would exceed this limit                   |
 | Injection template | `Character history:\n{{canon}}` | The wrapper text around the canon document                                         |
-| Injection position | In-prompt                       | Where in the prompt canon appears                                                  |
+| Injection position | After Main Prompt                       | Where in the prompt canon appears                                                  |
 
 The **Generate Canon** button synthesizes a prose narrative from resolved arc summaries and high-importance long-term facts, stores it at the character level, and immediately adds it to context. At least one resolved arc summary is required. On Profile B this regenerates automatically after each arc closes. Canon is stored at the character level and survives across chats - it is cleared by Fresh Start and the Long-term Memory Clear button. The canon textarea in the Canon section is also editable directly if you want to adjust it by hand.
 
@@ -232,7 +232,7 @@ The **Generate Canon** button synthesizes a prose narrative from resolved arc su
 | Max memories per character | 25                                                    | Hard cap on total stored memories. Storage is also balanced per type - no single type (fact, relationship, preference, event) can exceed `max / 4` entries so one category cannot crowd out others |
 | Injection token budget     | 500                                                   | When memories would exceed this limit, the least important ones are trimmed first - based on importance, how permanent they are, how recently they were recalled, and confidence                   |
 | Injection template         | `Memories from previous conversations:\n{{memories}}` | Wrapper text                                                                                                                                                                                       |
-| Injection position         | In-prompt                                             | Where in the prompt memories appear                                                                                                                                                                |
+| Injection position         | After Main Prompt                                             | Where in the prompt memories appear                                                                                                                                                                |
 
 The long-term list shows a **retired** badge on superseded entries. A "Show retired memories" toggle reveals them. Each retired entry has a "superseded by" link to the replacement. Memories with unresolved contradictions show a yellow warning indicator.
 
@@ -274,7 +274,7 @@ The Consolidation section is only visible in advanced mode. In simple mode it al
 | Also regenerate every  | Off (0)    | Profile B only. Regenerate every N messages even if extraction has not run. 0 = on extraction passes only |
 | Response length        | 600 tokens | How long the profile generation response can be                                                           |
 | Injection token budget | 400        | Trim profiles if they would exceed this many tokens                                                       |
-| Injection position     | In-prompt  | Where in the prompt profiles appear                                                                       |
+| Injection position     | After Main Prompt  | Where in the prompt profiles appear                                                                       |
 
 A live token count shows how much context the current profiles are using. A **Regenerate Profiles Now** button forces immediate regeneration. The current profiles are shown read-only below the controls.
 
@@ -476,10 +476,10 @@ Smart Memory's defaults are designed to layer cleanly alongside SillyTavern's Ve
 | Arcs       | In-chat   | 2     | Shares depth with ST chat vectors intentionally |
 | Session    | In-chat   | 3     | Just above ST's default vector depth            |
 | Scenes     | In-chat   | 6     | Further back - past scene context               |
-| Long-term  | In-prompt | -     | Near character card                             |
-| Short-term | In-prompt | -     | Rolling narrative summary                       |
-| Canon      | In-prompt | -     | Stable character history, separate slot         |
-| Profiles   | In-prompt | -     | State snapshots, near character card            |
+| Long-term  | After Main Prompt | -     | Near character card                             |
+| Short-term | After Main Prompt | -     | Rolling narrative summary                       |
+| Canon      | After Main Prompt | -     | Stable character history, separate slot         |
+| Profiles   | After Main Prompt | -     | State snapshots, near character card            |
 
 The away recap is shown as a popup to the user, not added to the prompt.
 
