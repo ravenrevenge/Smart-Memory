@@ -54,14 +54,6 @@ Restart SillyTavern. **Smart Memory** will appear in your Extensions panel.
 
 Smart Memory runs several memory systems in the background, each focused on a different slice of your story's history.
 
-### Short-term Memory - Context Summary
-
-When your conversation grows long enough that older messages start falling out of the AI's awareness, Smart Memory automatically writes a summary of everything so far and keeps it in context. The AI stays oriented in long stories even as older messages scroll away.
-
-After the first summary is written, only new messages get folded in - the summary grows with your story rather than being rewritten from scratch every time. It also knows what is already captured in your long-term and session memories, so it focuses on narrative flow rather than repeating facts stored elsewhere.
-
-The rolling summary sits alongside canon if you have it enabled - both can be active at the same time, covering different spans of your story's history.
-
 ### Long-term Memory - Persistent Facts
 
 Facts, relationship history, preferences, and significant events are extracted from your chats and saved for each character. These memories survive across all sessions - when you open a new chat with a character, everything they have learned is already there waiting.
@@ -76,17 +68,13 @@ Granular details from the current session: scene descriptions, things that were 
 
 Session memory is aware of what is already in long-term memory, so the two complement each other rather than duplicating information.
 
-### Character and World Profiles
+### Short-term Memory - Context Summary
 
-After each extraction pass, Smart Memory generates compact state snapshots from stored memories and adds them to context alongside the other tiers:
+When your conversation grows long enough that older messages start falling out of the AI's awareness, Smart Memory automatically writes a summary of everything so far and keeps it in context. The AI stays oriented in long stories even as older messages scroll away.
 
-- **Character state** - current emotional state, active goals, relationship posture
-- **World state** - active threads in the setting, recent developments, current scene context
-- **Relationship matrix** - one-line directional summary per named entity with a confidence score
+After the first summary is written, only new messages get folded in - the summary grows with your story rather than being rewritten from scratch every time. It also knows what is already captured in your long-term and session memories, so it focuses on narrative flow rather than repeating facts stored elsewhere.
 
-Profiles are regenerated after each extraction pass and on chat load if stale. On Profile B, an optional message-count schedule can keep them fresh between extraction passes. A manual regenerate button is available in the settings panel.
-
-In group chats, each character has their own independent profile. Switching the character selector updates the profiles panel to show that character's snapshot, and each character's profile is added to context when they are about to respond.
+The rolling summary sits alongside canon if you have it enabled - both can be active at the same time, covering different spans of your story's history.
 
 ### Scene Detection and History
 
@@ -103,6 +91,18 @@ Story arcs normally start fresh with each new chat. If you are running a continu
 Once you have at least one resolved arc summary, you can generate a **canon document** - a stable prose narrative synthesized from those arc summaries and high-importance long-term facts. Think of it as a "story bible" for the character: not a list of bullet points, but a composed history written by the model from everything it has learned.
 
 Canon gets its own dedicated slot, separate from the rolling short-term summary. Both can be active at the same time: the summary covers recent events, canon covers the broader history. Canon is stored at the character level and carries forward to new chats with the same character. It is cleared by **Fresh Start** and by the **Clear** button in the Long-term Memory section.
+
+### Character and World Profiles
+
+After each extraction pass, Smart Memory generates compact state snapshots from stored memories and adds them to context alongside the other tiers:
+
+- **Character state** - current emotional state, active goals, relationship posture
+- **World state** - active threads in the setting, recent developments, current scene context
+- **Relationship matrix** - one-line directional summary per named entity with a confidence score
+
+Profiles are regenerated after each extraction pass and on chat load if stale. On Profile B, an optional message-count schedule can keep them fresh between extraction passes. A manual regenerate button is available in the settings panel.
+
+In group chats, each character has their own independent profile. Switching the character selector updates the profiles panel to show that character's snapshot, and each character's profile is added to context when they are about to respond.
 
 ### Away Recap
 
@@ -202,27 +202,6 @@ If you do not have an embedding model set up, Smart Memory falls back to keyword
 ollama pull nomic-embed-text
 ```
 
-### Short-term Memory
-
-| Setting                   | Default                      | Description                                                                      |
-| ------------------------- | ---------------------------- | -------------------------------------------------------------------------------- |
-| Enable auto-summarization | On                           | Automatically summarize when the threshold is reached                            |
-| Context threshold         | 80%                          | Start summarizing when the context reaches this percentage of the model's limit  |
-| Summary response length   | 2000 tokens                  | How long the summary can be - also acts as the cap on what gets added to context |
-| Injection template        | `Story so far:\n{{summary}}` | The wrapper text around the summary                                              |
-| Injection position        | After Main Prompt                    | Where in the prompt the summary appears                                          |
-
-### Canon
-
-| Setting            | Default                         | Description                                                                        |
-| ------------------ | ------------------------------- | ---------------------------------------------------------------------------------- |
-| Enable canon       | On                              | Add canon to context and allow auto-regeneration. Turning this off suppresses both |
-| Injection budget   | 800 tokens                      | Canon text is trimmed from the end if it would exceed this limit                   |
-| Injection template | `Character history:\n{{canon}}` | The wrapper text around the canon document                                         |
-| Injection position | After Main Prompt                       | Where in the prompt canon appears                                                  |
-
-The **Generate Canon** button synthesizes a prose narrative from resolved arc summaries and high-importance long-term facts, stores it at the character level, and immediately adds it to context. At least one resolved arc summary is required. On Profile B this regenerates automatically after each arc closes. Canon is stored at the character level and survives across chats - it is cleared by Fresh Start and the Long-term Memory Clear button. The canon textarea in the Canon section is also editable directly if you want to adjust it by hand.
-
 ### Long-term Memory
 
 | Setting                    | Default                                               | Description                                                                                                                                                                                        |
@@ -232,7 +211,7 @@ The **Generate Canon** button synthesizes a prose narrative from resolved arc su
 | Max memories per character | 25                                                    | Hard cap on total stored memories. Storage is also balanced per type - no single type (fact, relationship, preference, event) can exceed `max / 4` entries so one category cannot crowd out others |
 | Injection token budget     | 500                                                   | When memories would exceed this limit, the least important ones are trimmed first - based on importance, how permanent they are, how recently they were recalled, and confidence                   |
 | Injection template         | `Memories from previous conversations:\n{{memories}}` | Wrapper text                                                                                                                                                                                       |
-| Injection position         | After Main Prompt                                             | Where in the prompt memories appear                                                                                                                                                                |
+| Injection position         | After Main Prompt                                     | Where in the prompt memories appear                                                                                                                                                                |
 
 The long-term list shows a **retired** badge on superseded entries. A "Show retired memories" toggle reveals them. Each retired entry has a "superseded by" link to the replacement. Memories with unresolved contradictions show a yellow warning indicator.
 
@@ -247,36 +226,15 @@ The long-term list shows a **retired** badge on superseded entries. A "Show reti
 | Injection template       | `Details from this session:\n{{session}}` | Wrapper text                                                                |
 | Injection position       | In-chat @ depth 3                         | Sits just above ST's default vector depth                                   |
 
-### Consolidation
+### Short-term Memory
 
-Over time, the same information can accumulate in slightly different forms across multiple extraction passes. Consolidation runs quietly in the background after each extraction and asks the AI to merge near-identical or redundant entries into richer single items. You end up with fewer, better memories rather than a growing list of overlapping notes.
-
-The Consolidation section is only visible in advanced mode. In simple mode it always runs on the defaults below.
-
-| Setting                               | Default | Description                                                                                |
-| ------------------------------------- | ------- | ------------------------------------------------------------------------------------------ |
-| Enable consolidation                  | On      | Master toggle - turning this off skips consolidation for both long-term and session memory |
-| Long-term: consolidate [fact] after   | 4       | How many unprocessed entries of this type accumulate before a consolidation pass fires     |
-| Long-term: consolidate [relationship] | 3       |                                                                                            |
-| Long-term: consolidate [preference]   | 3       |                                                                                            |
-| Long-term: consolidate [event]        | 4       |                                                                                            |
-| Session: consolidate [scene] after    | 3       | Same logic, for session memory types                                                       |
-| Session: consolidate [revelation]     | 3       |                                                                                            |
-| Session: consolidate [development]    | 3       |                                                                                            |
-| Session: consolidate [detail]         | 3       |                                                                                            |
-
-### Character and World Profiles
-
-| Setting                | Default    | Description                                                                                               |
-| ---------------------- | ---------- | --------------------------------------------------------------------------------------------------------- |
-| Enable profiles        | On         | Generate and add state snapshots to context after each extraction pass                                    |
-| Stale threshold        | 30 minutes | Regenerate on chat load if profiles are older than this                                                   |
-| Also regenerate every  | Off (0)    | Profile B only. Regenerate every N messages even if extraction has not run. 0 = on extraction passes only |
-| Response length        | 600 tokens | How long the profile generation response can be                                                           |
-| Injection token budget | 400        | Trim profiles if they would exceed this many tokens                                                       |
-| Injection position     | After Main Prompt  | Where in the prompt profiles appear                                                                       |
-
-A live token count shows how much context the current profiles are using. A **Regenerate Profiles Now** button forces immediate regeneration. The current profiles are shown read-only below the controls.
+| Setting                   | Default                      | Description                                                                      |
+| ------------------------- | ---------------------------- | -------------------------------------------------------------------------------- |
+| Enable auto-summarization | On                           | Automatically summarize when the threshold is reached                            |
+| Context threshold         | 80%                          | Start summarizing when the context reaches this percentage of the model's limit  |
+| Summary response length   | 2000 tokens                  | How long the summary can be - also acts as the cap on what gets added to context |
+| Injection template        | `Story so far:\n{{summary}}` | The wrapper text around the summary                                              |
+| Injection position        | After Main Prompt            | Where in the prompt the summary appears                                          |
 
 ### Scene Detection
 
@@ -296,6 +254,48 @@ A live token count shows how much context the current profiles are using. A **Re
 | Max tracked arcs       | 10                | Oldest arcs are dropped when the limit is hit      |
 | Injection token budget | 700               | Oldest arcs trimmed first when exceeded            |
 | Injection position     | In-chat @ depth 2 | Near current action, alongside chat vectors        |
+
+### Consolidation
+
+Over time, the same information can accumulate in slightly different forms across multiple extraction passes. Consolidation runs quietly in the background after each extraction and asks the AI to merge near-identical or redundant entries into richer single items. You end up with fewer, better memories rather than a growing list of overlapping notes.
+
+The Consolidation section is only visible in advanced mode. In simple mode it always runs on the defaults below.
+
+| Setting                               | Default | Description                                                                                |
+| ------------------------------------- | ------- | ------------------------------------------------------------------------------------------ |
+| Enable consolidation                  | On      | Master toggle - turning this off skips consolidation for both long-term and session memory |
+| Long-term: consolidate [fact] after   | 4       | How many unprocessed entries of this type accumulate before a consolidation pass fires     |
+| Long-term: consolidate [relationship] | 3       |                                                                                            |
+| Long-term: consolidate [preference]   | 3       |                                                                                            |
+| Long-term: consolidate [event]        | 4       |                                                                                            |
+| Session: consolidate [scene] after    | 3       | Same logic, for session memory types                                                       |
+| Session: consolidate [revelation]     | 3       |                                                                                            |
+| Session: consolidate [development]    | 3       |                                                                                            |
+| Session: consolidate [detail]         | 3       |                                                                                            |
+
+### Canon
+
+| Setting            | Default                         | Description                                                                        |
+| ------------------ | ------------------------------- | ---------------------------------------------------------------------------------- |
+| Enable canon       | On                              | Add canon to context and allow auto-regeneration. Turning this off suppresses both |
+| Injection budget   | 800 tokens                      | Canon text is trimmed from the end if it would exceed this limit                   |
+| Injection template | `Character history:\n{{canon}}` | The wrapper text around the canon document                                         |
+| Injection position | After Main Prompt               | Where in the prompt canon appears                                                  |
+
+The **Generate Canon** button synthesizes a prose narrative from resolved arc summaries and high-importance long-term facts, stores it at the character level, and immediately adds it to context. At least one resolved arc summary is required. On Profile B this regenerates automatically after each arc closes. Canon is stored at the character level and survives across chats - it is cleared by Fresh Start and the Long-term Memory Clear button. The canon textarea in the Canon section is also editable directly if you want to adjust it by hand.
+
+### Character and World Profiles
+
+| Setting                | Default    | Description                                                                                               |
+| ---------------------- | ---------- | --------------------------------------------------------------------------------------------------------- |
+| Enable profiles        | On         | Generate and add state snapshots to context after each extraction pass                                    |
+| Stale threshold        | 30 minutes | Regenerate on chat load if profiles are older than this                                                   |
+| Also regenerate every  | Off (0)    | Profile B only. Regenerate every N messages even if extraction has not run. 0 = on extraction passes only |
+| Response length        | 600 tokens | How long the profile generation response can be                                                           |
+| Injection token budget | 400        | Trim profiles if they would exceed this many tokens                                                       |
+| Injection position     | After Main Prompt  | Where in the prompt profiles appear                                                                       |
+
+A live token count shows how much context the current profiles are using. A **Regenerate Profiles Now** button forces immediate regeneration. The current profiles are shown read-only below the controls.
 
 ### Away Recap
 
