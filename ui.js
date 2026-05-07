@@ -588,6 +588,7 @@ export function updateSessionUI() {
                 <button class="sm_delete_session_memory menu_button" data-index="${idx}" title="Delete this memory">
                     <i class="fa-solid fa-trash-can"></i>
                 </button>
+                ${Array.isArray(mem.source_messages) && mem.source_messages.length > 0 ? `<button class="sm_jump_source menu_button" data-source-start="${mem.source_messages[mem.source_messages.length - 1][0]}" title="Jump to source message"><i class="fa-solid fa-arrow-up-right-from-square"></i></button>` : ''}
             </div>
         `);
     $list.append($item);
@@ -609,6 +610,12 @@ export function updateSessionUI() {
     $target[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
     $target.addClass('sm_memory_highlight');
     setTimeout(() => $target.removeClass('sm_memory_highlight'), 1500);
+  });
+
+  $list.find('.sm_jump_source').on('click', function () {
+    const startIdx = parseInt($(this).data('source-start'), 10);
+    const $msg = $(`#chat .mes[mesid="${startIdx}"]`);
+    if ($msg.length) $msg[0].scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
 
   $list.find('.sm_edit_session_memory').on('click', async function () {
@@ -1190,6 +1197,7 @@ export function renderMemoriesList(memories, characterName) {
                 <button class="sm_delete_memory menu_button" data-index="${idx}" title="Delete this memory">
                     <i class="fa-solid fa-trash-can"></i>
                 </button>
+                ${Array.isArray(mem.source_messages) && mem.source_messages.length > 0 && mem.source_chat_id === getContext().chatId ? `<button class="sm_jump_source menu_button" data-source-start="${mem.source_messages[mem.source_messages.length - 1][0]}" title="Jump to source message"><i class="fa-solid fa-arrow-up-right-from-square"></i></button>` : ''}
             </div>
         `);
     $list.append($item);
@@ -1212,6 +1220,12 @@ export function renderMemoriesList(memories, characterName) {
     $target[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
     $target.addClass('sm_memory_highlight');
     setTimeout(() => $target.removeClass('sm_memory_highlight'), 1500);
+  });
+
+  $list.find('.sm_jump_source').on('click', function () {
+    const startIdx = parseInt($(this).data('source-start'), 10);
+    const $msg = $(`#chat .mes[mesid="${startIdx}"]`);
+    if ($msg.length) $msg[0].scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
 
   $list.find('.sm_edit_memory').on('click', function () {

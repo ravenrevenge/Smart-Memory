@@ -330,14 +330,23 @@ export async function extractSessionMemories(recentMessages, abortCheck = null) 
     } = await verifySessionCandidates(parseSessionOutput(response), existing);
     if (incoming.length === 0) return 0;
 
+    // Tag each new memory with the source message range so users can jump back
+    // to the passage that prompted the extraction.
+    const context = getContext();
+    const chatLen = context.chat?.length ?? 1;
+    const windowEnd = Math.max(0, chatLen - 2);
+    const windowStart = Math.max(0, windowEnd - recentMessages.length + 1);
+    for (const mem of incoming) {
+      mem.source_messages = [[windowStart, windowEnd]];
+    }
+
     const max = settings.session_max_memories ?? 30;
     const merged = await deduplicateSession(existing, incoming, max);
 
     // Apply supersession links. For each candidate that supersedes an existing
     // memory: mark the old memory as retired (superseded_by + valid_to) and
     // link the new memory back to it (supersedes + valid_from).
-    const context = getContext();
-    const messageIndex = Math.max(0, (context.chat?.length ?? 1) - 1);
+    const messageIndex = Math.max(0, chatLen - 1);
 
     const newlyRetiredIds = new Set();
     for (const [candText, oldId] of supersessionMap) {

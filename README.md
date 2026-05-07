@@ -402,6 +402,7 @@ Every entry in the long-term memory, session memory, and story arc lists has act
 - **Pencil (edit)** - replaces the entry with an inline text editor. Edit the content and click **Save**, or **Cancel** to discard changes. Not shown on retired memories.
 - **Trash / Checkmark (delete/resolve)** - removes the entry immediately. For story arcs the button is a checkmark to indicate resolving the thread rather than discarding it.
 - **Pin (story arcs only)** - marks the arc as persistent so it carries into future chats. The pin icon turns gold and the arc gets a gold left border when pinned. Click again to unpin.
+- **Jump to source** - scrolls the chat to the message window the memory was extracted from. Shown on session memories whenever provenance is available, and on long-term memories when the memory was extracted from the current chat.
 
 Below each list an **Add** form lets you insert a new entry manually:
 

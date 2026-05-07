@@ -49,6 +49,7 @@ import {
 } from '../../../extensions.js';
 import {
   MODULE_NAME,
+  META_KEY,
   PROMPT_KEY_SHORT,
   PROMPT_KEY_LONG,
   PROMPT_KEY_SESSION,
@@ -239,6 +240,42 @@ function getStableExtractionWindow(chat, windowSize) {
   if (cutoff <= 0) return [];
 
   const start = Math.max(0, cutoff - windowSize);
+  return chat.slice(start, cutoff);
+}
+
+/**
+ * Smart extraction window for memory tiers.
+ *
+ * On first extraction (lastCutoff null) falls back to maxWindow. On subsequent
+ * passes, starts from just after the last processed message but always includes
+ * at least extractEvery * 2 messages so the model has enough context to make
+ * meaningful distinctions. Capped at maxWindow to avoid unbounded growth when
+ * the chat has advanced a long way since the last pass.
+ *
+ * @param {Array} chat - Full chat array from SillyTavern context.
+ * @param {number|null} lastCutoff - Exclusive end index used in the previous pass, or null.
+ * @param {number} extractEvery - Current extraction interval setting.
+ * @param {number} maxWindow - Hard cap on window size.
+ * @returns {Array} Stable message slice.
+ */
+function getSmartExtractionWindow(chat, lastCutoff, extractEvery, maxWindow) {
+  if (!Array.isArray(chat) || chat.length === 0) return [];
+
+  const last = chat[chat.length - 1];
+  const cutoff = last && !last.is_user && !last.is_system ? chat.length - 1 : chat.length;
+  if (cutoff <= 0) return [];
+
+  let start;
+  if (lastCutoff === null || lastCutoff === undefined) {
+    start = Math.max(0, cutoff - maxWindow);
+  } else {
+    // Start from just after the last processed message, but ensure at least
+    // extractEvery * 2 messages of context. Cap at maxWindow so a very old
+    // lastCutoff does not produce a huge window.
+    const newStart = lastCutoff;
+    const minContextStart = cutoff - extractEvery * 2;
+    start = Math.max(Math.min(newStart, minContextStart), cutoff - maxWindow, 0);
+  }
   return chat.slice(start, cutoff);
 }
 
@@ -515,13 +552,25 @@ async function onCharacterMessageRendered() {
       const capturedGen = chatLoadId;
       const chatChanged = () => chatLoadId !== capturedGen;
 
-      // Use separate windows per tier. Session benefits from more context than
-      // long-term (scene/detail extraction needs the surrounding messages);
-      // long-term extraction targets distilled facts that are visible in a
-      // narrower window. Arc extraction uses a wide window to catch threads
-      // that were introduced earlier in the session.
-      const sessionWindow = getStableExtractionWindow(context.chat, 40);
-      const longtermWindow = getStableExtractionWindow(context.chat, 20);
+      // Use separate windows per tier. Both memory tiers use a smart window
+      // that starts from just after the last processed message so already-seen
+      // messages are not re-fed on every pass. A minimum of extractEvery * 2
+      // messages is always included so the model has enough context to make
+      // meaningful distinctions. Arc extraction uses a fixed wide window to
+      // catch threads that were introduced earlier in the session.
+      const lastExtractCutoff = context.chatMetadata?.[META_KEY]?.lastExtractCutoff ?? null;
+      const sessionWindow = getSmartExtractionWindow(
+        context.chat,
+        lastExtractCutoff,
+        extractEvery,
+        40,
+      );
+      const longtermWindow = getSmartExtractionWindow(
+        context.chat,
+        lastExtractCutoff,
+        extractEvery,
+        20,
+      );
 
       // If only a fresh assistant reply exists beyond the stable boundary,
       // postpone extraction until the next turn so swipes settle first.
@@ -706,6 +755,18 @@ async function onCharacterMessageRendered() {
         maybeInjectUnified();
         updateTokenDisplay();
         setStatusMessage(total > 0 ? `${total} item${total === 1 ? '' : 's'} stored.` : '');
+
+        // Persist the cutoff so the next extraction pass knows where this one ended.
+        const lastMsg = context.chat[context.chat.length - 1];
+        const newCutoff =
+          context.chat.length > 0 && lastMsg && !lastMsg.is_user && !lastMsg.is_system
+            ? context.chat.length - 1
+            : context.chat.length;
+        const metaAfter = context.chatMetadata?.[META_KEY];
+        if (metaAfter) {
+          metaAfter.lastExtractCutoff = newCutoff;
+          context.saveMetadata();
+        }
       } catch (err) {
         if (err === CHAT_SWITCHED) {
           smLog('[SmartMemory] Extraction aborted: chat switched mid-extraction.');
@@ -1239,11 +1300,22 @@ async function onGroupWrapperFinished({ type } = {}) {
       extractionRunning = true;
       smLog(`[SmartMemory] Group extraction starting at ${new Date().toISOString()}`);
 
-      const sessionWindow = getStableExtractionWindow(context.chat, 40);
+      const lastExtractCutoff = context.chatMetadata?.[META_KEY]?.lastExtractCutoff ?? null;
+      const sessionWindow = getSmartExtractionWindow(
+        context.chat,
+        lastExtractCutoff,
+        extractEvery,
+        40,
+      );
       // Scale the raw window by character count so that after per-character
       // filtering each character still gets roughly 20 messages of context.
       const longtermRawSize = 20 * Math.max(1, roundResponders.size);
-      const longtermWindow = getStableExtractionWindow(context.chat, longtermRawSize);
+      const longtermWindow = getSmartExtractionWindow(
+        context.chat,
+        lastExtractCutoff,
+        extractEvery,
+        longtermRawSize,
+      );
 
       if (longtermWindow.length === 0 && sessionWindow.length === 0) {
         extractionRunning = false;
@@ -1426,6 +1498,20 @@ async function onGroupWrapperFinished({ type } = {}) {
           updateSessionUI();
 
           setStatusMessage(total > 0 ? `${total} item${total === 1 ? '' : 's'} stored.` : '');
+
+          const lastMsgGroup = context.chat[context.chat.length - 1];
+          const newCutoffGroup =
+            context.chat.length > 0 &&
+            lastMsgGroup &&
+            !lastMsgGroup.is_user &&
+            !lastMsgGroup.is_system
+              ? context.chat.length - 1
+              : context.chat.length;
+          const metaAfterGroup = context.chatMetadata?.[META_KEY];
+          if (metaAfterGroup) {
+            metaAfterGroup.lastExtractCutoff = newCutoffGroup;
+            context.saveMetadata();
+          }
         } catch (err) {
           if (err === CHAT_SWITCHED) {
             smLog('[SmartMemory] Group extraction aborted: chat switched mid-extraction.');

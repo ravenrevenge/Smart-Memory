@@ -70,6 +70,7 @@ export function applyGraphDefaults(mem) {
     ...mem,
     id: mem.id ?? generateMemoryId(),
     source_messages: mem.source_messages ?? [],
+    source_chat_id: mem.source_chat_id ?? null,
     entities: mem.entities ?? [],
     time_scope: mem.time_scope ?? 'global',
     valid_from: mem.valid_from ?? null,

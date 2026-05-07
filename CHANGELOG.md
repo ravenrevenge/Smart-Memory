@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Source-message provenance**: long-term and session memories now record which
+  message range they were extracted from. A **jump-to-source** button appears on
+  each memory entry when provenance is available - click it to scroll the chat
+  directly to the messages that produced the memory. The button is shown on session
+  memories whenever provenance is present, and on long-term memories only when the
+  source chat matches the current chat.
+
+- **Smart extraction window**: automatic extraction no longer re-processes
+  messages it has already seen. Each extraction pass records a cutoff index in
+  `chatMetadata`; the next pass starts from that cutoff rather than from a fixed
+  lookback. A minimum context floor (two extraction intervals) ensures the model
+  always has enough context for quality output even when few new messages have
+  arrived. The Memorize Chat and per-tier Extract Now buttons are unaffected and
+  continue to use their fixed windows.
+
 ## [1.6.10] - 2026-05-06
 
 ### Fixed

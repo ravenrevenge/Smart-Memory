@@ -43,6 +43,7 @@ import {
   extension_prompt_types,
   extension_prompt_roles,
   saveSettingsDebounced,
+  getCurrentChatId,
 } from '../../../../script.js';
 import { generateMemoryExtract } from './generate.js';
 import { getContext, extension_settings } from '../../../extensions.js';
@@ -406,6 +407,19 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
       return 0;
     }
 
+    // Tag each new memory with the source message range and chat ID so users
+    // can jump back to the passage that prompted the extraction.
+    const context = getContext();
+    const chatLen = context.chat?.length ?? 1;
+    // Window ends one before the last message (last AI turn is excluded from extraction).
+    const windowEnd = Math.max(0, chatLen - 2);
+    const windowStart = Math.max(0, windowEnd - recentMessages.length + 1);
+    const sourceChatId = getCurrentChatId() ?? null;
+    for (const mem of newMemories) {
+      mem.source_messages = [[windowStart, windowEnd]];
+      mem.source_chat_id = sourceChatId;
+    }
+
     const maxMemories = settings.longterm_max_memories || 25;
     // Merge new memories into the active set. Result includes both existing
     // active entries and the newly accepted candidates.
@@ -414,8 +428,7 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
     // Apply supersession links. For each candidate that supersedes an existing
     // memory: mark the old memory as retired (superseded_by + valid_to) and
     // link the new memory back to it (supersedes + valid_from).
-    const context = getContext();
-    const messageIndex = Math.max(0, (context.chat?.length ?? 1) - 1);
+    const messageIndex = Math.max(0, chatLen - 1);
 
     const newlyRetiredIds = new Set();
     for (const [candText, oldId] of supersessionMap) {
@@ -635,6 +648,31 @@ export async function consolidateMemories(characterName, force = false) {
         [...base, ...unprocessed],
         getEmbeddingBatch,
       );
+
+      // Carry source provenance forward: for each reconciled entry that matches
+      // a pre-consolidation memory by ID, inherit its source_messages and
+      // source_chat_id. Synthesized composite entries get the most recent range
+      // from the unprocessed batch they were derived from.
+      const allInputs = [...base, ...unprocessed];
+      const mostRecentSource = unprocessed.reduce((best, m) => {
+        const ranges = m.source_messages;
+        if (!Array.isArray(ranges) || ranges.length === 0) return best;
+        const last = ranges[ranges.length - 1];
+        return !best || last[1] > best[1] ? last : best;
+      }, null);
+      const mostRecentChatId =
+        unprocessed.find((m) => Array.isArray(m.source_messages) && m.source_messages.length > 0)
+          ?.source_chat_id ?? null;
+      for (const entry of reconciledType) {
+        const match = allInputs.find((m) => m.id === entry.id);
+        if (match && Array.isArray(match.source_messages) && match.source_messages.length > 0) {
+          entry.source_messages = match.source_messages;
+          entry.source_chat_id = match.source_chat_id ?? null;
+        } else if (!entry.source_messages?.length && mostRecentSource) {
+          entry.source_messages = [mostRecentSource];
+          entry.source_chat_id = mostRecentChatId;
+        }
+      }
 
       // Replace this type's entries. Other types are untouched.
       const otherTypes = memories.filter((m) => m.type !== type);
