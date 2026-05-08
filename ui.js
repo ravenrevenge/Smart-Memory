@@ -748,14 +748,20 @@ export function updateScenesUI() {
 export function updateArcsUI() {
   const arcs = loadArcs();
   const $list = $('#sm_arcs_list');
+  const $resolvedList = $('#sm_resolved_arcs_list');
+  const $resolvedSection = $('#sm_resolved_arcs_section');
   $list.empty();
+  $resolvedList.empty();
 
   const ctx = getContext();
   const groupId = ctx.groupId ?? null;
   const charName = groupId ? null : getCurrentCharacterName();
   const canPin = !!(charName || groupId);
 
-  if (arcs.length === 0) {
+  const activeArcs = arcs.filter((a) => !a.resolved);
+  const resolvedArcs = arcs.filter((a) => a.resolved);
+
+  if (activeArcs.length === 0) {
     $list.append('<div class="sm_no_char">No open story threads.</div>');
   }
 
@@ -763,22 +769,20 @@ export function updateArcsUI() {
     const isPersistent = !!arc.persistent;
     const isResolved = !!arc.resolved;
 
-    let $item;
     if (isResolved) {
-      // Resolved pinned arcs: shown for reference but not injected. The user
-      // can re-open the thread or unpin to remove it entirely.
-      $item = $(`
+      const $item = $(`
               <div class="sm_arc_item sm_arc_persistent sm_arc_resolved" data-index="${idx}">
                   <span class="sm_arc_text">${$('<div>').text(arc.content).html()}</span>
                   <button class="sm_reopen_arc menu_button" data-index="${idx}" title="Re-open this thread"><i class="fa-solid fa-rotate-left"></i></button>
-                  <button class="sm_pin_arc menu_button sm_pin_active" data-index="${idx}" title="Unpin and remove"><i class="fa-solid fa-thumbtack"></i></button>
+                  <button class="sm_remove_resolved_arc menu_button" data-index="${idx}" title="Remove"><i class="fa-solid fa-xmark"></i></button>
               </div>
           `);
+      $resolvedList.append($item);
     } else {
       const pinTitle = isPersistent
         ? 'Unpin - keep only in this chat'
         : 'Pin - carry this thread into future chats';
-      $item = $(`
+      const $item = $(`
               <div class="sm_arc_item${isPersistent ? ' sm_arc_persistent' : ''}" data-index="${idx}">
                   <span class="sm_arc_text">${$('<div>').text(arc.content).html()}</span>
                   ${canPin ? `<button class="sm_pin_arc menu_button${isPersistent ? ' sm_pin_active' : ''}" data-index="${idx}" title="${pinTitle}"><i class="fa-solid fa-thumbtack"></i></button>` : ''}
@@ -790,13 +794,38 @@ export function updateArcsUI() {
                   </button>
               </div>
           `);
+      $list.append($item);
     }
-    $list.append($item);
   });
 
-  $list.find('.sm_reopen_arc').on('click', async function () {
+  // Show the resolved section only when there are resolved arcs.
+  $resolvedSection.toggle(resolvedArcs.length > 0);
+
+  $resolvedList.find('.sm_reopen_arc').on('click', async function () {
     const idx = parseInt($(this).data('index'), 10);
     await reopenArc(idx, charName, groupId);
+    injectArcs();
+    updateArcsUI();
+  });
+
+  $resolvedList.find('.sm_remove_resolved_arc').on('click', async function () {
+    const idx = parseInt($(this).data('index'), 10);
+    const arc = loadArcs()[idx];
+    if (!arc) return;
+    await deleteArc(idx, charName);
+    if (groupId) {
+      const gP = loadGroupPersistentArcs(groupId);
+      saveGroupPersistentArcs(
+        groupId,
+        gP.filter((p) => p.content !== arc.content),
+      );
+    } else if (charName) {
+      const cP = loadPersistentArcs(charName);
+      savePersistentArcs(
+        charName,
+        cP.filter((p) => p.content !== arc.content),
+      );
+    }
     injectArcs();
     updateArcsUI();
   });
@@ -805,23 +834,7 @@ export function updateArcsUI() {
     const idx = parseInt($(this).data('index'), 10);
     const arc = loadArcs()[idx];
     if (!arc) return;
-    if (arc.resolved) {
-      // Unpin on a resolved arc removes it entirely.
-      await deleteArc(idx, charName);
-      if (groupId) {
-        const gP = loadGroupPersistentArcs(groupId);
-        saveGroupPersistentArcs(
-          groupId,
-          gP.filter((p) => p.content !== arc.content),
-        );
-      } else if (charName) {
-        const cP = loadPersistentArcs(charName);
-        savePersistentArcs(
-          charName,
-          cP.filter((p) => p.content !== arc.content),
-        );
-      }
-    } else if (arc.persistent) {
+    if (arc.persistent) {
       await demoteArc(idx, charName, groupId);
     } else {
       await promoteArc(idx, charName, groupId);
