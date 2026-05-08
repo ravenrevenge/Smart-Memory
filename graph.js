@@ -281,6 +281,7 @@ function buildGraph(characterName, opts) {
       color: MEMORY_COLORS[mem.type] ?? '#666',
       radius: r,
       retired: Boolean(mem.superseded_by),
+      triggers: Array.isArray(mem.triggers) && mem.triggers.length > 0 ? mem.triggers : null,
       x: 0,
       y: 0,
       vx: 0,
@@ -644,9 +645,12 @@ function renderTooltip() {
 
   const esc = (s) => $('<div>').text(s).html();
   const typeLabel = node.nodeType === 'entity' ? `Entity - ${node.subtype}` : node.subtype;
+  const triggersLine = node.triggers
+    ? `<span class="sm_graph_tip_triggers">Triggers: ${esc(node.triggers.join(', '))}</span>`
+    : '';
   const content = `<strong>${esc(node.nodeType === 'entity' ? node.label : node.subtype)}</strong>
     <span class="sm_graph_tip_type">${esc(typeLabel)}</span>
-    <span class="sm_graph_tip_detail">${esc(node.detail)}</span>`;
+    <span class="sm_graph_tip_detail">${esc(node.detail)}</span>${triggersLine}`;
 
   $tip.html(content);
 

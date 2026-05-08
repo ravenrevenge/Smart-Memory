@@ -1494,6 +1494,15 @@
   word-break: break-word;
 }
 
+.sm_graph_tip_triggers {
+  display: block;
+  margin-top: 5px;
+  font-size: 0.8em;
+  opacity: 0.5;
+  font-style: italic;
+  word-break: break-word;
+}
+
 #sm_graph_legend {
   display: flex;
   gap: 20px;
