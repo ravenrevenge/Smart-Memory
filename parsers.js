@@ -214,10 +214,32 @@ export function parseArcOutput(text, existingArcs) {
   const addPattern = /^\[arc\]\s+(.+)$/gim;
   const resolvedPattern = /^\[resolved\]\s+(.+)$/gim;
 
+  // Patterns that indicate a genuine open narrative thread - goal/obligation
+  // language, incompleteness markers, unknown-actor framing, open questions.
+  // Candidates that match none of these are almost always declarative facts or
+  // scene details that the model misfiled as arcs, and are filtered out.
+  const ARC_SIGNALS = [
+    /\b(unknown|unclear|unresolved|uncertain|unanswered)\b/i,
+    /\bremains?\s+(unknown|unclear|open|unresolved)\b/i,
+    /\bhas\s+yet\s+to\b/i,
+    /\byet\s+to\b/i,
+    /\bneeds?\s+to\b/i,
+    /\bmust\b/i,
+    /\b(promised|swore|vowed|pledged)\b/i,
+    /\bplans?\s+to\b/i,
+    /\b(wants?\s+to|seeks?\s+to|trying\s+to)\b/i,
+    /\b(someone|whoever)\b/i,
+    /\bthe\s+identity\s+of\b/i,
+    /\bwhether\b/i,
+    /\bwhere\s+(is|are|was|were)\b/i,
+    /\bwho\s+(is|are|was|were|killed|took|has)\b/i,
+  ];
+
   let match;
   while ((match = addPattern.exec(text)) !== null) {
     const content = match[1].trim();
-    if (content.length > 5) toAdd.push({ content, ts: Date.now() });
+    if (content.length > 5 && ARC_SIGNALS.some((p) => p.test(content)))
+      toAdd.push({ content, ts: Date.now() });
   }
 
   while ((match = resolvedPattern.exec(text)) !== null) {
