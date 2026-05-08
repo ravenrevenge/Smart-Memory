@@ -58,6 +58,7 @@ import {
   PROMPT_KEY_REPAIR,
   PROMPT_KEY_PROFILES,
   PROMPT_KEY_CANON,
+  PROMPT_KEY_TRIGGERED,
 } from './constants.js';
 import { memory_sources, abortCurrentMemoryGeneration } from './generate.js';
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
@@ -356,6 +357,7 @@ function clearAllInjections() {
   setExtensionPrompt(PROMPT_KEY_REPAIR, '', none, 0);
   setExtensionPrompt(PROMPT_KEY_PROFILES, '', none, 0);
   setExtensionPrompt(PROMPT_KEY_CANON, '', none, 0);
+  setExtensionPrompt(PROMPT_KEY_TRIGGERED, '', none, 0);
   clearUnifiedSlot();
   updateTokenDisplay();
 }

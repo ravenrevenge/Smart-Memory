@@ -148,6 +148,7 @@ export const defaultSettings = {
   longterm_position: extension_prompt_types.IN_PROMPT,
   longterm_depth: 2,
   longterm_role: extension_prompt_roles.SYSTEM,
+  longterm_triggered_depth: 4,
   longterm_template: 'Memories from previous conversations:\n{{memories}}',
 
   // Session memory
@@ -1155,6 +1156,13 @@ export function bindSettingsUI(ctrl) {
     .val(s.longterm_role)
     .on('change', function () {
       extension_settings[MODULE_NAME].longterm_role = parseInt($(this).val(), 10);
+      saveSettingsDebounced();
+    });
+
+  $('#sm_longterm_triggered_depth')
+    .val(s.longterm_triggered_depth ?? 4)
+    .on('change', function () {
+      extension_settings[MODULE_NAME].longterm_triggered_depth = parseInt($(this).val(), 10);
       saveSettingsDebounced();
     });
 

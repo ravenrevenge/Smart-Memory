@@ -28,9 +28,12 @@
  * saveCharacterMemories    - persists the memory array for a character
  * clearCharacterMemories   - deletes all memories for a character
  * formatMemoriesForPrompt  - formats the memory array as [type] content lines
- * extractAndStoreMemories  - runs extraction against recent messages and merges results
+ * extractAndStoreMemories  - runs extraction against recent messages and merges results;
+ *                            also populates activation triggers for newly written memories
  * consolidateMemories      - evaluates unprocessed entries against the stable consolidated base per type
- * injectMemories           - pushes memories into the prompt via setExtensionPrompt
+ * injectMemories           - pushes memories into the prompt via setExtensionPrompt;
+ *                            memories whose triggers match the current turn are injected a second
+ *                            time into PROMPT_KEY_TRIGGERED closer to the prompt
  * isFreshStart             - returns whether the current chat has fresh-start enabled
  * setFreshStart            - toggles the fresh-start flag and saves chatMetadata
  * getReadOnlyStartIndex    - returns the chat index at which read-only mode was last enabled
@@ -51,6 +54,7 @@ import {
   estimateTokens,
   MODULE_NAME,
   PROMPT_KEY_LONG,
+  PROMPT_KEY_TRIGGERED,
   MEMORY_TYPES,
   META_KEY,
 } from './constants.js';
@@ -75,6 +79,8 @@ import {
   selectProtectedMemories,
   sortByTimeline,
   trimByPriority,
+  deriveTriggers,
+  filterTriggersByFrequency,
 } from './memory-utils.js';
 import { batchVerify, getEmbeddingBatch, getHardwareProfile } from './embeddings.js';
 import { smLog } from './logging.js';
@@ -500,11 +506,31 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
       }
     }
 
+    // Populate triggers for newly added memories. We derive keywords from each
+    // memory's content, exclude the character name and any current group members
+    // (they appear in almost every memory and would be useless triggers), then
+    // drop terms that are too common across the full active set.
+    const existingKeys = new Set(activeMemories.map((m) => `${m.type}|${m.content}`));
+    const groupMembers = (() => {
+      const ctx = getContext();
+      if (!ctx.groupId) return [];
+      const group = ctx.groups?.find((g) => g.id === ctx.groupId);
+      return (group?.members ?? [])
+        .map((avatarId) => ctx.characters?.find((c) => c.avatar === avatarId)?.name)
+        .filter(Boolean);
+    })();
+    const excludeNames = [characterName, ...groupMembers].filter(Boolean);
+    for (const mem of finalActive) {
+      if (existingKeys.has(`${mem.type}|${mem.content}`)) continue; // skip existing memories
+      if (Array.isArray(mem.triggers) && mem.triggers.length > 0) continue; // already derived
+      const raw = deriveTriggers(mem.content, excludeNames);
+      mem.triggers = filterTriggersByFrequency(raw, finalActive);
+    }
+
     // Resolve entity names to ids for any new memories that carried
     // _raw_entity_names through the pipeline. The entity registry is loaded,
     // updated in place, then persisted alongside the memories.
     const entityRegistry = loadCharacterEntityRegistry(characterName);
-    const existingKeys = new Set(activeMemories.map((m) => `${m.type}|${m.content}`));
     for (const mem of finalActive) {
       if (Array.isArray(mem._raw_entity_names)) {
         resolveEntityNames(mem, mem._raw_entity_names, messageIndex, entityRegistry);
@@ -730,6 +756,7 @@ export async function injectMemories(characterName, updateTelemetry = false) {
 
   if (!settings.longterm_enabled || !characterName) {
     setExtensionPrompt(PROMPT_KEY_LONG, '', extension_prompt_types.NONE, 0);
+    setExtensionPrompt(PROMPT_KEY_TRIGGERED, '', extension_prompt_types.NONE, 0);
     invalidateUnifiedCache(PROMPT_KEY_LONG);
     return;
   }
@@ -739,6 +766,7 @@ export async function injectMemories(characterName, updateTelemetry = false) {
   const memories = loadCharacterMemories(characterName).filter((m) => !m.superseded_by);
   if (memories.length === 0) {
     setExtensionPrompt(PROMPT_KEY_LONG, '', extension_prompt_types.NONE, 0);
+    setExtensionPrompt(PROMPT_KEY_TRIGGERED, '', extension_prompt_types.NONE, 0);
     invalidateUnifiedCache(PROMPT_KEY_LONG);
     return;
   }
@@ -759,6 +787,10 @@ export async function injectMemories(characterName, updateTelemetry = false) {
     const lastMessages = (context.chat ?? []).slice(-2);
     const turnMentions = extractTurnEntityMentions(lastMessages);
     const entityRegistry = loadCharacterEntityRegistry(characterName);
+    const recentTextForScorer = lastMessages
+      .map((m) => m.mes || '')
+      .join(' ')
+      .toLowerCase();
     trimmed = await hybridPrioritize(memories, {
       turnMentions,
       entityRegistry,
@@ -766,6 +798,7 @@ export async function injectMemories(characterName, updateTelemetry = false) {
       embedFn: getEmbeddingBatch,
       lastTurnText: lastMessages[lastMessages.length - 1]?.mes ?? '',
       w5: getHardwareProfile() === 'b' ? 0.6 : 0.2,
+      recentText: recentTextForScorer,
     });
   } else {
     trimmed = prioritizeMemories(memories);
@@ -822,13 +855,39 @@ export async function injectMemories(characterName, updateTelemetry = false) {
     saveSettingsDebounced();
   }
 
+  // Build recentText for trigger matching: last few messages lowercased.
+  // Used both here for injection split and passed to hybridPrioritize above.
+  const recentContext = getContext();
+  const recentMsgs = (recentContext.chat ?? []).slice(-4);
+  const recentText = recentMsgs
+    .map((m) => m.mes || '')
+    .join(' ')
+    .toLowerCase();
+  const recentWords = new Set(recentText.split(/\W+/).filter(Boolean));
+
+  // Split trimmed into triggered (any trigger matches recentText) and regular.
+  // Triggered memories are placed at the end of the main block so the model
+  // reads them closest to the current turn, and also injected separately into
+  // PROMPT_KEY_TRIGGERED at IN_CHAT depth so they appear even nearer to the prompt.
+  const triggeredSet = new Set(
+    trimmed.filter(
+      (m) =>
+        Array.isArray(m.triggers) &&
+        m.triggers.length > 0 &&
+        m.triggers.some((t) => recentWords.has(t)),
+    ),
+  );
+  const regular = trimmed.filter((m) => !triggeredSet.has(m));
+  const triggered = trimmed.filter((m) => triggeredSet.has(m));
+  const ordered = [...regular, ...triggered];
+
   // Format for injection: plain bullet list without [type] tags.
   // The [type] format is kept in formatMemoriesForPrompt for the extraction/consolidation
   // pipeline - those prompts need it. The RP model does not, and bracket notation
   // bleeds into story output when the model sees it repeatedly in context.
-  const memoryText = trimmed.map((m) => `- ${m.content}`).join('\n');
   const template =
     settings.longterm_template || 'Memories from previous conversations:\n{{memories}}';
+  const memoryText = ordered.map((m) => `- ${m.content}`).join('\n');
   const content = template.replace('{{memories}}', memoryText);
 
   setExtensionPrompt(
@@ -839,6 +898,23 @@ export async function injectMemories(characterName, updateTelemetry = false) {
     false,
     settings.longterm_role ?? extension_prompt_roles.SYSTEM,
   );
+
+  // Secondary injection for triggered memories only, placed closer to the prompt.
+  // Cleared when no triggers fire so stale content never lingers.
+  if (triggered.length > 0) {
+    const triggeredText = triggered.map((m) => `- ${m.content}`).join('\n');
+    const triggeredContent = template.replace('{{memories}}', triggeredText);
+    setExtensionPrompt(
+      PROMPT_KEY_TRIGGERED,
+      triggeredContent,
+      extension_prompt_types.IN_CHAT,
+      settings.longterm_triggered_depth ?? 4,
+      false,
+      settings.longterm_role ?? extension_prompt_roles.SYSTEM,
+    );
+  } else {
+    setExtensionPrompt(PROMPT_KEY_TRIGGERED, '', extension_prompt_types.NONE, 0);
+  }
 }
 
 // ---- Fresh-start helpers ------------------------------------------------

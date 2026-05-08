@@ -817,6 +817,28 @@ function migrateChat_v5(chatMeta) {
   return updated;
 }
 
+/**
+ * CHARACTER migration: version 5 -> 6
+ *
+ * Adds a `triggers` array to every long-term memory. Triggers are short
+ * keyword strings derived from the memory content at extraction time. When
+ * any trigger appears in the current chat turn, the memory gets a score
+ * bonus in hybridScore and is also injected into the secondary
+ * PROMPT_KEY_TRIGGERED slot closer to the prompt.
+ *
+ * Existing memories receive an empty array here; triggers are derived from
+ * content on the next extraction pass via deriveTriggers in memory-utils.js.
+ *
+ * @param {Object} charData - Character data object.
+ * @returns {Object} Updated character data with schema_version NOT yet set.
+ */
+function migrateCharacter_v6(charData) {
+  const memories = (charData.memories ?? []).map((m) =>
+    Object.prototype.hasOwnProperty.call(m, 'triggers') ? m : { ...m, triggers: [] },
+  );
+  return { ...charData, memories };
+}
+
 // ---- Step registries --------------------------------------------------------
 // Map<version, stepFn | { fn, deletePaths }> - add new entries here when
 // SCHEMA_VERSION is bumped. Use { fn, deletePaths } only when a step
@@ -826,6 +848,7 @@ const CHARACTER_MIGRATIONS = new Map([
   [1, migrateCharacter_v1],
   [2, migrateCharacter_v2],
   [4, migrateCharacter_v4],
+  [6, migrateCharacter_v6],
 ]);
 
 const CHAT_MIGRATIONS = new Map([

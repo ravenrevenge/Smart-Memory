@@ -24,6 +24,10 @@
  * injection keys, and the valid memory type enums for both long-term and
  * session memory. Also exports estimateTokens for injection budget checks
  * and generateMemoryId for stable UUID assignment.
+ *
+ * PROMPT_KEY_TRIGGERED is the secondary IN_CHAT slot used by the activation
+ * triggers feature to inject contextually relevant long-term memories closer
+ * to the prompt when their trigger keywords appear in the current turn.
  */
 
 /** Extension name as registered in extension_settings. */
@@ -45,6 +49,10 @@ export const PROMPT_KEY_CANON = 'smart_memory_canon';
 // Single unified block used when unified_injection mode is enabled.
 // All individual tier slots are cleared and their content merged here instead.
 export const PROMPT_KEY_UNIFIED = 'smart_memory_unified';
+// Secondary IN_CHAT slot for long-term memories whose activation triggers match
+// the current turn. These are injected closer to the prompt in addition to
+// appearing at the end of the main PROMPT_KEY_LONG block.
+export const PROMPT_KEY_TRIGGERED = 'smart_memory_triggered';
 
 /** Valid type tags for long-term memory entries. */
 export const MEMORY_TYPES = ['fact', 'relationship', 'preference', 'event'];
@@ -69,7 +77,7 @@ export const META_KEY = 'smartMemory';
  * - Version 0 is the implicit state for any container that has no stored version
  *   (i.e. all data written by v1.3.0 or earlier, before this system existed).
  */
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 /**
  * Rough token estimate for a string. Uses the standard ~4 chars-per-token
