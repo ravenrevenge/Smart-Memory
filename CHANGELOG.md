@@ -32,7 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   chats, bringing them to parity with solo chats. Pinned arcs are stored against
   the group ID and automatically merged into new chats for that group on load.
   When an arc is resolved the group's persistent store is cleaned up so resolved
-  threads do not resurface in future chats.
+  threads do not resurface in future chats. On each chat load, stored group arc
+  data for groups that no longer exist is pruned automatically, preventing
+  accumulation for users who create and remove groups frequently.
 
 ## [1.6.10] - 2026-05-06
 
