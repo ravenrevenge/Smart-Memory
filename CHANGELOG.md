@@ -14,7 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   each memory entry when provenance is available - click it to scroll the chat
   directly to the messages that produced the memory. The button is shown on session
   memories whenever provenance is present, and on long-term memories only when the
-  source chat matches the current chat.
+  source chat matches the current chat. Clicking the button closes the extensions
+  panel, scrolls the chat to the source range, and flashes the messages in the
+  range with a pulsing outline so they are easy to spot on landing. The jump button
+  is positioned before the edit button; only the delete button is styled in red -
+  edit and jump use the theme's default text color.
 
 - **Smart extraction window**: automatic extraction no longer re-processes
   messages it has already seen. Each extraction pass records a cutoff index in
