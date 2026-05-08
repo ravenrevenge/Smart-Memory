@@ -72,7 +72,12 @@ import {
   injectArcs,
   promoteArc,
   demoteArc,
+  reopenArc,
   loadArcSummaries,
+  loadPersistentArcs,
+  savePersistentArcs,
+  loadGroupPersistentArcs,
+  saveGroupPersistentArcs,
 } from './arcs.js';
 import { loadCanon } from './canon.js';
 import { loadProfiles } from './profiles.js';
@@ -756,29 +761,67 @@ export function updateArcsUI() {
 
   arcs.forEach((arc, idx) => {
     const isPersistent = !!arc.persistent;
-    const pinTitle = isPersistent
-      ? 'Unpin - keep only in this chat'
-      : 'Pin - carry this thread into future chats';
-    const $item = $(`
-            <div class="sm_arc_item${isPersistent ? ' sm_arc_persistent' : ''}" data-index="${idx}">
-                <span class="sm_arc_text">${$('<div>').text(arc.content).html()}</span>
-                ${canPin ? `<button class="sm_pin_arc menu_button${isPersistent ? ' sm_pin_active' : ''}" data-index="${idx}" title="${pinTitle}"><i class="fa-solid fa-thumbtack"></i></button>` : ''}
-                <button class="sm_edit_arc menu_button" data-index="${idx}" title="Edit this arc">
-                    <i class="fa-solid fa-pencil"></i>
-                </button>
-                <button class="sm_delete_arc menu_button" data-index="${idx}" title="Resolve / remove this arc">
-                    <i class="fa-solid fa-check"></i>
-                </button>
-            </div>
-        `);
+    const isResolved = !!arc.resolved;
+
+    let $item;
+    if (isResolved) {
+      // Resolved pinned arcs: shown for reference but not injected. The user
+      // can re-open the thread or unpin to remove it entirely.
+      $item = $(`
+              <div class="sm_arc_item sm_arc_persistent sm_arc_resolved" data-index="${idx}">
+                  <span class="sm_arc_text">${$('<div>').text(arc.content).html()}</span>
+                  <button class="sm_reopen_arc menu_button" data-index="${idx}" title="Re-open this thread"><i class="fa-solid fa-rotate-left"></i></button>
+                  <button class="sm_pin_arc menu_button sm_pin_active" data-index="${idx}" title="Unpin and remove"><i class="fa-solid fa-thumbtack"></i></button>
+              </div>
+          `);
+    } else {
+      const pinTitle = isPersistent
+        ? 'Unpin - keep only in this chat'
+        : 'Pin - carry this thread into future chats';
+      $item = $(`
+              <div class="sm_arc_item${isPersistent ? ' sm_arc_persistent' : ''}" data-index="${idx}">
+                  <span class="sm_arc_text">${$('<div>').text(arc.content).html()}</span>
+                  ${canPin ? `<button class="sm_pin_arc menu_button${isPersistent ? ' sm_pin_active' : ''}" data-index="${idx}" title="${pinTitle}"><i class="fa-solid fa-thumbtack"></i></button>` : ''}
+                  <button class="sm_edit_arc menu_button" data-index="${idx}" title="Edit this arc">
+                      <i class="fa-solid fa-pencil"></i>
+                  </button>
+                  <button class="sm_delete_arc menu_button" data-index="${idx}" title="Resolve / remove this arc">
+                      <i class="fa-solid fa-check"></i>
+                  </button>
+              </div>
+          `);
+    }
     $list.append($item);
+  });
+
+  $list.find('.sm_reopen_arc').on('click', async function () {
+    const idx = parseInt($(this).data('index'), 10);
+    await reopenArc(idx, charName, groupId);
+    injectArcs();
+    updateArcsUI();
   });
 
   $list.find('.sm_pin_arc').on('click', async function () {
     const idx = parseInt($(this).data('index'), 10);
     const arc = loadArcs()[idx];
     if (!arc) return;
-    if (arc.persistent) {
+    if (arc.resolved) {
+      // Unpin on a resolved arc removes it entirely.
+      await deleteArc(idx, charName);
+      if (groupId) {
+        const gP = loadGroupPersistentArcs(groupId);
+        saveGroupPersistentArcs(
+          groupId,
+          gP.filter((p) => p.content !== arc.content),
+        );
+      } else if (charName) {
+        const cP = loadPersistentArcs(charName);
+        savePersistentArcs(
+          charName,
+          cP.filter((p) => p.content !== arc.content),
+        );
+      }
+    } else if (arc.persistent) {
       await demoteArc(idx, charName, groupId);
     } else {
       await promoteArc(idx, charName, groupId);
@@ -810,8 +853,29 @@ export function updateArcsUI() {
       if (!newContent) return;
       const arcs = loadArcs();
       if (!arcs[idx]) return;
+      const oldContent = arcs[idx].content;
+      const isPersistent = !!arcs[idx].persistent;
       arcs[idx].content = newContent;
       await saveArcs(arcs);
+      // Mirror content edits into the persistent store so the updated text
+      // carries into future chats instead of the old version resurfacing.
+      if (isPersistent) {
+        if (groupId) {
+          const gPersistent = loadGroupPersistentArcs(groupId);
+          const match = gPersistent.find((p) => p.content === oldContent);
+          if (match) {
+            match.content = newContent;
+            saveGroupPersistentArcs(groupId, gPersistent);
+          }
+        } else if (charName) {
+          const cPersistent = loadPersistentArcs(charName);
+          const match = cPersistent.find((p) => p.content === oldContent);
+          if (match) {
+            match.content = newContent;
+            savePersistentArcs(charName, cPersistent);
+          }
+        }
+      }
       injectArcs();
       updateArcsUI();
     });

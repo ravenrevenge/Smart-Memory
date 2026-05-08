@@ -90,8 +90,6 @@ import {
   loadArcs,
   loadArcSummaries,
   mergePersistentArcs,
-  loadPersistentArcs,
-  savePersistentArcs,
   mergeGroupPersistentArcs,
   loadGroupPersistentArcs,
   saveGroupPersistentArcs,
@@ -1467,25 +1465,27 @@ async function onGroupWrapperFinished({ type } = {}) {
             updateArcsUI();
             total += count;
 
-            // Clean persistent arcs for all responding characters and the group
-            // store. The solo path does this inside extractArcs via characterName,
-            // but group arc extraction is chat-wide with no single characterName.
-            // Any persistent arc whose content is no longer in the current arc
-            // list was resolved and must be removed from the persistent store.
-            const currentArcContents = new Set(loadArcs().map((a) => a.content));
-            for (const charName of roundResponders) {
-              const persistent = loadPersistentArcs(charName);
-              if (persistent.length === 0) continue;
-              const cleaned = persistent.filter((a) => currentArcContents.has(a.content));
-              if (cleaned.length < persistent.length) savePersistentArcs(charName, cleaned);
-            }
+            // Sync resolved flags into the group persistent store. The solo path
+            // handles this inside extractArcs via characterName, but group arc
+            // extraction is chat-wide with no single characterName. Any arc now
+            // marked resolved in chatMetadata should also be marked resolved in
+            // the group store so the state carries into future chats.
             const groupId = context.groupId;
             if (groupId) {
-              const groupPersistent = loadGroupPersistentArcs(groupId);
-              if (groupPersistent.length > 0) {
-                const cleaned = groupPersistent.filter((a) => currentArcContents.has(a.content));
-                if (cleaned.length < groupPersistent.length)
-                  saveGroupPersistentArcs(groupId, cleaned);
+              const currentArcs = loadArcs();
+              const resolvedContents = new Set(
+                currentArcs.filter((a) => a.resolved).map((a) => a.content),
+              );
+              if (resolvedContents.size > 0) {
+                const groupPersistent = loadGroupPersistentArcs(groupId);
+                let changed = false;
+                for (const p of groupPersistent) {
+                  if (resolvedContents.has(p.content) && !p.resolved) {
+                    p.resolved = true;
+                    changed = true;
+                  }
+                }
+                if (changed) saveGroupPersistentArcs(groupId, groupPersistent);
               }
             }
           }

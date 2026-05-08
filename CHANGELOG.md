@@ -31,10 +31,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Pinned arc transfers for group chats**: story arcs can now be pinned in group
   chats, bringing them to parity with solo chats. Pinned arcs are stored against
   the group ID and automatically merged into new chats for that group on load.
-  When an arc is resolved the group's persistent store is cleaned up so resolved
-  threads do not resurface in future chats. On each chat load, stored group arc
-  data for groups that no longer exist is pruned automatically, preventing
-  accumulation for users who create and remove groups frequently.
+  On each chat load, stored group arc data for groups that no longer exist is
+  pruned automatically, preventing accumulation for users who create and remove
+  groups frequently.
+
+- **Resolved state for pinned arcs**: pinned arcs that get resolved by extraction
+  are now kept in the arc panel rather than deleted. They appear visually distinct
+  (strikethrough text, muted border) and are not injected into context. A
+  re-open button lets the user reactivate a resolved thread if the story revisits
+  it; clicking unpin on a resolved arc removes it entirely. The resolved state
+  carries into future chats via the persistent store. New extraction passes treat
+  resolved arcs as invisible so fresh instances of a similar thread can be added
+  without being blocked as duplicates.
 
 ## [1.6.10] - 2026-05-06
 
