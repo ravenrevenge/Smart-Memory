@@ -582,13 +582,13 @@ export function updateSessionUI() {
                 <span class="sm_memory_expiration sm_expiration_${expiration}" title="Expires: ${expiration}">${expiration}</span>
                 ${retiredBadge}${supersededByLink}${conflictBadge}
                 <span class="sm_memory_text">${$('<div>').text(mem.content).html()}</span>
+                ${Array.isArray(mem.source_messages) && mem.source_messages.length > 0 ? `<button class="sm_jump_source menu_button" data-source-start="${mem.source_messages[mem.source_messages.length - 1][0]}" data-source-end="${mem.source_messages[mem.source_messages.length - 1][1]}" title="Jump to source message"><i class="fa-solid fa-arrow-up-right-from-square"></i></button>` : ''}
                 <button class="sm_edit_session_memory menu_button" data-index="${idx}" title="Edit this memory" ${isRetired ? 'style="display:none"' : ''}>
                     <i class="fa-solid fa-pencil"></i>
                 </button>
                 <button class="sm_delete_session_memory menu_button" data-index="${idx}" title="Delete this memory">
                     <i class="fa-solid fa-trash-can"></i>
                 </button>
-                ${Array.isArray(mem.source_messages) && mem.source_messages.length > 0 ? `<button class="sm_jump_source menu_button" data-source-start="${mem.source_messages[mem.source_messages.length - 1][0]}" data-source-end="${mem.source_messages[mem.source_messages.length - 1][1]}" title="Jump to source message"><i class="fa-solid fa-arrow-up-right-from-square"></i></button>` : ''}
             </div>
         `);
     $list.append($item);
@@ -1211,13 +1211,13 @@ export function renderMemoriesList(memories, characterName) {
                 <span class="sm_memory_expiration sm_expiration_${expiration}" title="Expires: ${expiration}">${expiration}</span>
                 ${retiredBadge}${supersededByLink}${conflictBadge}
                 <span class="sm_memory_text">${$('<div>').text(mem.content).html()}</span>
+                ${Array.isArray(mem.source_messages) && mem.source_messages.length > 0 && mem.source_chat_id === getContext().chatId ? `<button class="sm_jump_source menu_button" data-source-start="${mem.source_messages[mem.source_messages.length - 1][0]}" data-source-end="${mem.source_messages[mem.source_messages.length - 1][1]}" title="Jump to source message"><i class="fa-solid fa-arrow-up-right-from-square"></i></button>` : ''}
                 <button class="sm_edit_memory menu_button" data-index="${idx}" title="Edit this memory" ${isRetired ? 'style="display:none"' : ''}>
                     <i class="fa-solid fa-pencil"></i>
                 </button>
                 <button class="sm_delete_memory menu_button" data-index="${idx}" title="Delete this memory">
                     <i class="fa-solid fa-trash-can"></i>
                 </button>
-                ${Array.isArray(mem.source_messages) && mem.source_messages.length > 0 && mem.source_chat_id === getContext().chatId ? `<button class="sm_jump_source menu_button" data-source-start="${mem.source_messages[mem.source_messages.length - 1][0]}" data-source-end="${mem.source_messages[mem.source_messages.length - 1][1]}" title="Jump to source message"><i class="fa-solid fa-arrow-up-right-from-square"></i></button>` : ''}
             </div>
         `);
     $list.append($item);
