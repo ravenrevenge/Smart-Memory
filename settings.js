@@ -76,7 +76,7 @@ import {
   detectSceneBreakHeuristic,
 } from './scenes.js';
 import { extractArcs, injectArcs, clearArcs, clearArcSummaries, loadArcSummaries } from './arcs.js';
-import { runModelTest } from './model-test.js';
+import { runModelTest, TEST_MESSAGES, TEST_CHARACTERS } from './model-test.js';
 import { checkContinuity, generateRepair, injectRepair } from './continuity.js';
 import { getHardwareProfile, getEmbeddingBatch, clearEmbeddingFailed } from './embeddings.js';
 import { clearCanon, generateCanon, injectCanon, saveCanon } from './canon.js';
@@ -798,16 +798,28 @@ export function bindSettingsUI(ctrl) {
       return;
     }
 
-    // All tiers passed - render paginated tier review.
+    // All tiers passed - render scenario reference + paginated tier review.
     const tiers = outcome.tiers;
     let current = 0;
 
+    const scenarioLines = TEST_MESSAGES.map((m) => `${m.name}: ${m.mes ?? m.text}`).join('\n');
+    const charactersNote = `Characters: ${TEST_CHARACTERS.join(', ')}`;
+
+    $result.html(`
+      <div class="sm_model_test_pass_header">
+        <i class="fa-solid fa-circle-check"></i> All tiers returned output.
+      </div>
+      <details class="sm_model_test_scenario">
+        <summary>View test scenario</summary>
+        <p class="sm_model_test_scenario_note">${charactersNote}. Read through this before judging each tier - it is the only way to catch invented facts that look plausible.</p>
+        <textarea class="sm_model_test_output text_pole" readonly>${scenarioLines}</textarea>
+      </details>
+      <div id="sm_model_test_tier_area"></div>
+    `);
+
     function renderTier() {
       const tier = tiers[current];
-      $result.html(`
-        <div class="sm_model_test_pass_header">
-          <i class="fa-solid fa-circle-check"></i> All tiers returned output.
-        </div>
+      $('#sm_model_test_tier_area').html(`
         <div class="sm_model_test_tier_name">${tier.name} <span class="sm_model_test_tier_pos">${current + 1} / ${tiers.length}</span></div>
         <div class="sm_model_test_tier_hint">${tier.hint}</div>
         <textarea class="sm_model_test_output text_pole" readonly>${tier.items.join('\n')}</textarea>

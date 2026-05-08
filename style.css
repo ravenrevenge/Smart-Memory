@@ -903,6 +903,29 @@
   font-size: 0.875em;
 }
 
+#smart_memory_settings .sm_model_test_scenario {
+  margin: 6px 0;
+  border: 1px solid var(--SmartReplyBorderColor, rgba(255, 255, 255, 0.1));
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+
+#smart_memory_settings .sm_model_test_scenario > summary {
+  cursor: pointer;
+  font-size: 0.8em;
+  opacity: 0.7;
+  user-select: none;
+  padding: 2px 0;
+}
+
+#smart_memory_settings .sm_model_test_scenario_note {
+  font-size: 0.78em;
+  opacity: 0.6;
+  font-style: italic;
+  line-height: 1.4;
+  margin: 4px 0;
+}
+
 #smart_memory_settings .sm_model_test_tier_name {
   font-weight: 600;
   display: flex;

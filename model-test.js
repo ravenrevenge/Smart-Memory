@@ -40,7 +40,7 @@ import { parseExtractionOutput, parseSessionOutput, parseArcOutput } from './par
 // A fixed roleplay scenario designed to exercise all three extraction tiers.
 // Rich enough that a capable model should produce multiple items per tier;
 // long enough to surface models that degrade on larger prompts.
-const TEST_CHARACTERS = ['Yara', 'Cael'];
+export const TEST_CHARACTERS = ['Yara', 'Cael'];
 
 // A post-armistice occupied city. Yara is a former resistance fighter looking
 // for her brother Daven, who went into hiding after the war ended and has now
@@ -51,7 +51,7 @@ const TEST_CHARACTERS = ['Yara', 'Cael'];
 // the conversation - the brother is not found, the surveillance tail is not
 // identified, Cael's handler does not discover him. This prevents the model
 // from confusing established facts with open threads.
-const TEST_MESSAGES = [
+export const TEST_MESSAGES = [
   {
     name: 'Cael',
     text: 'You got my note. I was not sure you would come after last time.',
