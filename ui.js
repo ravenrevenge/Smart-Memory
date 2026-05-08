@@ -617,15 +617,9 @@ export function updateSessionUI() {
     const endIdx = parseInt($(this).data('source-end'), 10);
     const $startMsg = $(`#chat .mes[mesid="${startIdx}"]`);
     if (!$startMsg.length) return;
-    // Close the extension panel so the chat is visible when the scroll lands.
-    const $drawerContent = $('#smart_memory_settings')
-      .closest('.inline-drawer')
-      .find('>.inline-drawer-content');
-    if ($drawerContent.is(':visible')) {
-      $('#smart_memory_settings')
-        .closest('.inline-drawer')
-        .find('>.inline-drawer-header')
-        .trigger('click');
+    // Close the extensions panel so the chat is visible when the scroll lands.
+    if ($('#rm_extensions_block').hasClass('openDrawer')) {
+      $('#extensions-settings-button .drawer-toggle').trigger('click');
     }
     // Scroll to the first message in the source range.
     setTimeout(() => {
@@ -1251,15 +1245,9 @@ export function renderMemoriesList(memories, characterName) {
     const endIdx = parseInt($(this).data('source-end'), 10);
     const $startMsg = $(`#chat .mes[mesid="${startIdx}"]`);
     if (!$startMsg.length) return;
-    // Close the extension panel so the chat is visible when the scroll lands.
-    const $drawerContent = $('#smart_memory_settings')
-      .closest('.inline-drawer')
-      .find('>.inline-drawer-content');
-    if ($drawerContent.is(':visible')) {
-      $('#smart_memory_settings')
-        .closest('.inline-drawer')
-        .find('>.inline-drawer-header')
-        .trigger('click');
+    // Close the extensions panel so the chat is visible when the scroll lands.
+    if ($('#rm_extensions_block').hasClass('openDrawer')) {
+      $('#extensions-settings-button .drawer-toggle').trigger('click');
     }
     // Scroll to the first message in the source range.
     setTimeout(() => {
