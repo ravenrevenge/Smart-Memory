@@ -490,6 +490,8 @@ export function parseRelationshipDeltaResponse(response) {
     const magnitude = magnitudeMatch ? magnitudeMatch[1].toLowerCase() : 'low';
 
     // Strip whichever magnitude form was matched, then parse remaining descriptors.
+    // Also strip transitional phrases the model uses to describe change over multiple
+    // passes ("then more X", "increasingly X", "still X") - we only want the current state word.
     const descriptors = rest
       .replace(MAGNITUDE_RE, '')
       .replace(MAGNITUDE_BARE_RE, ',')
@@ -498,6 +500,10 @@ export function parseRelationshipDeltaResponse(response) {
         d
           .trim()
           .toLowerCase()
+          .replace(
+            /\b(?:then\s+(?:more\s+)?|increasingly\s+|still\s+|even\s+more\s+|becoming\s+(?:more\s+)?)/g,
+            '',
+          )
           .replace(/[^a-z\s-]/g, '')
           .trim(),
       )

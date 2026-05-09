@@ -611,10 +611,15 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
 
         // Only store pairs where the character is one of the parties.
         // Pairs between two other people belong in their own records.
+        // Bidirectional substring match handles cases where the card name
+        // is a full name ("Asher Somel") but the RP uses a short form ("Asher").
         const charLower = characterName.toLowerCase();
+        const nameMatches = (name) => {
+          const n = name.toLowerCase();
+          return n.includes(charLower) || charLower.includes(n);
+        };
         const relevant = deltas.filter(
-          ({ subject, target }) =>
-            subject.toLowerCase().includes(charLower) || target.toLowerCase().includes(charLower),
+          ({ subject, target }) => nameMatches(subject) || nameMatches(target),
         );
 
         if (relevant.length > 0) {
