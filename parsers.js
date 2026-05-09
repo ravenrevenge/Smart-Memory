@@ -434,12 +434,13 @@ export function parseTriggerResponse(response, memoryContent) {
   );
   return String(response || '')
     .split(/[,\n]/)
-    .map((t) =>
+    .flatMap((t) =>
       t
         .trim()
         .toLowerCase()
         .replace(/[^a-z0-9\s]/g, '')
-        .trim(),
+        .trim()
+        .split(/\s+/),
     )
     .filter((t) => t.length >= 3 && t.length <= 40 && /[a-z]/.test(t) && !contentWords.has(t))
     .slice(0, 8);
