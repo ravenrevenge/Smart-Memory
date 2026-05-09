@@ -514,7 +514,7 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
     // cues not present in the memory text itself, scored at a higher bonus per hit.
     // Runs sequentially to avoid OOM on limited VRAM (Ollama serialises anyway).
     const existingKeys = new Set(activeMemories.map((m) => `${m.type}|${m.content}`));
-    if (getHardwareProfile() === 'b') {
+    if (getHardwareProfile() === 'b' || settings.longterm_triggers_enabled) {
       for (const mem of finalActive) {
         if (existingKeys.has(`${mem.type}|${mem.content}`)) continue; // skip existing memories
         if (Array.isArray(mem.triggers) && mem.triggers.length > 0) continue; // already derived
