@@ -82,9 +82,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   itself. Memories that score a contextual hit are also placed at the end of the
   main injection block and injected a second time into a secondary in-chat slot
   closer to the prompt (configurable depth, default 4) so the roleplay model sees
-  them right before it responds. Schema v6 adds a `triggers` field to all memories
-  for future LLM-suggested trigger storage; the field is empty for Profile A and
-  populated at write time for Profile B once that path is implemented.
+  them right before it responds. Schema v6 adds a `triggers` field to all memories.
+  On Profile B (hosted models), this field is populated at write time via a short
+  model call that asks the extraction LLM to suggest contextual keywords not present
+  in the memory text - synonyms, related concepts, and situational cues. These
+  LLM-suggested triggers score at 80 pts per hit (versus 40 pts for plain
+  content-word overlap) so memories with strong semantic relevance surface ahead of
+  memories that merely share vocabulary with the current turn. On Profile A the
+  field remains empty; content-word overlap handles the baseline.
 
 ## [1.6.10] - 2026-05-06
 

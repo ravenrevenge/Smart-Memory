@@ -33,6 +33,7 @@
  * formatSummary             - strips model analysis scaffolding and extracts the summary text
  * detectSceneBreakHeuristic - pattern-based scene break check, no model call required
  * parseProfileOutput        - extracts character_state, world_state, and relationship_matrix from profile generation output
+ * parseTriggerResponse      - parses the comma-separated keyword list from a trigger generation response
  *
  * All new memory objects produced by the parse functions carry the full graph
  * field set (id, source_messages, entities, time_scope, valid_from, valid_to,
@@ -407,6 +408,41 @@ export function parseProfileOutput(response) {
     world_state: world_state ?? '',
     relationship_matrix: relationship_matrix ?? '',
   };
+}
+
+// ---- Trigger keyword parser ---------------------------------------------
+
+/**
+ * Parses the comma-separated keyword list returned by buildTriggerGenerationPrompt.
+ *
+ * Filters out any token that is already a word in the memory content - the
+ * model sometimes repeats content words despite the instruction. Also drops
+ * tokens that are too short, too long, or contain no alphabetic characters.
+ * Caps output at 6 entries in case the model over-generates.
+ *
+ * @param {string} response - Raw model response to the trigger generation prompt.
+ * @param {string} memoryContent - The memory content the triggers are for.
+ * @returns {string[]} Filtered, lowercased trigger tokens.
+ */
+export function parseTriggerResponse(response, memoryContent) {
+  const contentWords = new Set(
+    String(memoryContent || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length >= 3),
+  );
+  return String(response || '')
+    .split(/[,\n]/)
+    .map((t) =>
+      t
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, '')
+        .trim(),
+    )
+    .filter((t) => t.length >= 3 && t.length <= 40 && /[a-z]/.test(t) && !contentWords.has(t))
+    .slice(0, 6);
 }
 
 // ---- Scene break heuristics ---------------------------------------------

@@ -69,8 +69,9 @@ import {
   buildExtractionPrompt,
   buildLongtermConsolidationPrompt,
   buildSupersessionConfirmPrompt,
+  buildTriggerGenerationPrompt,
 } from './prompts.js';
-import { parseExtractionOutput } from './parsers.js';
+import { parseExtractionOutput, parseTriggerResponse } from './parsers.js';
 import {
   prioritizeMemories,
   hybridPrioritize,
@@ -80,6 +81,7 @@ import {
   sortByTimeline,
   trimByPriority,
   keywordSet,
+  filterTriggersByFrequency,
 } from './memory-utils.js';
 import { batchVerify, getEmbeddingBatch, getHardwareProfile } from './embeddings.js';
 import { smLog } from './logging.js';
@@ -509,9 +511,29 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
     // Noun-derived triggers (Profile A) are redundant with direct content matching
     // and add no signal - the scoring path handles Profile A via content overlap.
     // LLM-suggested triggers add genuine value by capturing synonyms and contextual
-    // cues not present in the memory text itself. Not yet implemented; placeholder
-    // so the triggers field exists on new memories and the schema is forward-compatible.
+    // cues not present in the memory text itself, scored at a higher bonus per hit.
+    // Runs sequentially to avoid OOM on limited VRAM (Ollama serialises anyway).
     const existingKeys = new Set(activeMemories.map((m) => `${m.type}|${m.content}`));
+    if (getHardwareProfile() === 'b') {
+      for (const mem of finalActive) {
+        if (existingKeys.has(`${mem.type}|${mem.content}`)) continue; // skip existing memories
+        if (Array.isArray(mem.triggers) && mem.triggers.length > 0) continue; // already derived
+        try {
+          const triggerPrompt = buildTriggerGenerationPrompt(mem.content);
+          const triggerResponse = await generateMemoryExtract(triggerPrompt, {
+            responseLength: 60,
+          });
+          const raw = parseTriggerResponse(triggerResponse, mem.content);
+          mem.triggers = filterTriggersByFrequency(raw, finalActive);
+          smLog(
+            `[SmartMemory] Triggers for "${mem.content.slice(0, 50)}": ${mem.triggers.join(', ')}`,
+          );
+        } catch (err) {
+          smLog(`[SmartMemory] Trigger generation failed: ${err.message}`);
+          mem.triggers = [];
+        }
+      }
+    }
 
     // Resolve entity names to ids for any new memories that carried
     // _raw_entity_names through the pipeline. The entity registry is loaded,

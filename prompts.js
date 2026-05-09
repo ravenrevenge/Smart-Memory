@@ -39,6 +39,7 @@
  * buildProfileGenerationPrompt     - generates character_state, world_state, and relationship_matrix from stored memories
  * buildCanonSummaryPrompt          - generates a stable per-character canon narrative from arc summaries and memories
  * buildSupersessionConfirmPrompt   - binary UPDATE/INDEPENDENT prompt for model-confirmed supersession (method B)
+ * buildTriggerGenerationPrompt     - asks the model for contextual trigger keywords for a single memory (Profile B)
  *
  * Entity tagging: both extraction prompts instruct the model to append an
  * optional `:entity=Name1,Name2` suffix to the bracket tag for any memory
@@ -693,5 +694,32 @@ CURRENT STATE:
 [A paragraph on where things stand now - unresolved tensions, active goals, and where the story is heading]
 
 Output only the three labelled paragraphs. No preamble, no disclaimers.`
+  );
+}
+
+// ---- Activation trigger generation (Profile B) ------------------------------
+
+/**
+ * Asks the model to suggest contextual trigger keywords for a single memory.
+ * Used on Profile B (hosted models) at write time so that memories can be
+ * surfaced by synonyms and situational cues that do not literally appear in
+ * the memory text.
+ *
+ * The model is instructed to avoid repeating words already in the memory and
+ * to focus on what someone would say or describe when the memory is relevant,
+ * not just what the memory itself says.
+ *
+ * @param {string} content - The memory content string.
+ * @returns {string} The assembled prompt.
+ */
+export function buildTriggerGenerationPrompt(content) {
+  return (
+    `[KEYWORD TASK - Output a comma-separated list only. Do NOT continue any story or explain your choices.]\n\n` +
+    `Memory: "${content}"\n\n` +
+    `List 3 to 5 short keywords or brief phrases that would signal this memory is relevant to a conversation. ` +
+    `Focus on synonyms, related concepts, and situational cues - words someone might use when this topic comes up ` +
+    `that are NOT already words in the memory text above.\n\n` +
+    `Output format: keyword1, keyword2, keyword3\n` +
+    `Output:`
   );
 }
