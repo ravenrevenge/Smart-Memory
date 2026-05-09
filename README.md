@@ -84,6 +84,14 @@ A small bar in the settings panel shows how many tokens each memory tier is curr
 
 Facts, relationship history, preferences, and significant events are extracted from your chats and saved for each character. These memories survive across all sessions - when you open a new chat with a character, everything they have learned is already there waiting.
 
+### Relationship History
+
+Alongside individual memories, Smart Memory tracks the current emotional state of every named relationship as a set of descriptors - words like `warm`, `cautious`, `fragile`, `mistrustful`. After each extraction pass the model reviews the scene and records any shifts: what the relationship now feels like, and how strongly (`low`, `medium`, `high`). These states accumulate across sessions so the AI always knows the current standing between characters, not just scattered memories about past events.
+
+The **Relationship History** section in the settings panel shows all tracked pairs for the current character. You can add pairs manually (useful for seeding a relationship described in the character card), edit any pair to correct or refine the descriptors, and delete pairs that are no longer relevant. Relationship History is cleared alongside long-term memories when you use **Clear Memories** or **Fresh Start**.
+
+Only pairs whose names appear in the recent message window are injected into context, so the block stays small even for characters with many relationships.
+
 Over time, memories are automatically consolidated so the same information does not pile up in slightly different forms. Smart Memory is good at recognising when two differently-worded entries are saying the same thing, so you end up with a clean, rich picture of the character rather than a growing cluttered list.
 
 When a new memory describes a change - "Alex no longer distrusts Finn", "she moved to the capital", "the guild was disbanded" - the old fact is automatically retired and replaced rather than left alongside the newer truth as a contradiction.
@@ -339,6 +347,15 @@ If you do not have an embedding model set up, Smart Memory falls back to keyword
 ```sh
 ollama pull nomic-embed-text
 ```
+
+### Relationship History
+
+| Setting                     | Default | Description                                                                         |
+| --------------------------- | ------- | ----------------------------------------------------------------------------------- |
+| Enable relationship history | On      | Extract and inject per-pair emotional state across sessions                         |
+| Injection token budget      | 250     | Budget for the relationship block; funded from within the shared 3100 token default |
+| Injection position          | In-chat | Where the relationship block appears in the prompt                                  |
+| Injection depth             | 5       | Distance from the user prompt (lower = closer)                                      |
 
 ### Long-term Memory
 

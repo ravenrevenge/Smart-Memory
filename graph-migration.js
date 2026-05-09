@@ -839,6 +839,13 @@ function migrateCharacter_v6(charData) {
   return { ...charData, memories };
 }
 
+function migrateCharacter_v7(charData) {
+  // Add relationship_history map if absent. Keys are "subject→target" strings;
+  // values are { descriptors: string[], magnitude: string, updatedAt: number }.
+  if (Object.prototype.hasOwnProperty.call(charData, 'relationship_history')) return charData;
+  return { ...charData, relationship_history: {} };
+}
+
 // ---- Step registries --------------------------------------------------------
 // Map<version, stepFn | { fn, deletePaths }> - add new entries here when
 // SCHEMA_VERSION is bumped. Use { fn, deletePaths } only when a step
@@ -849,6 +856,7 @@ const CHARACTER_MIGRATIONS = new Map([
   [2, migrateCharacter_v2],
   [4, migrateCharacter_v4],
   [6, migrateCharacter_v6],
+  [7, migrateCharacter_v7],
 ]);
 
 const CHAT_MIGRATIONS = new Map([

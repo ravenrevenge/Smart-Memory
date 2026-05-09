@@ -28,6 +28,8 @@
  * PROMPT_KEY_TRIGGERED is the secondary IN_CHAT slot used by the activation
  * triggers feature to inject contextually relevant long-term memories closer
  * to the prompt when their trigger keywords appear in the current turn.
+ * PROMPT_KEY_RELATIONSHIPS is the slot for persistent relationship state -
+ * per-pair emotional deltas accumulated across sessions.
  */
 
 /** Extension name as registered in extension_settings. */
@@ -53,6 +55,9 @@ export const PROMPT_KEY_UNIFIED = 'smart_memory_unified';
 // the current turn. These are injected closer to the prompt in addition to
 // appearing at the end of the main PROMPT_KEY_LONG block.
 export const PROMPT_KEY_TRIGGERED = 'smart_memory_triggered';
+// Persistent relationship state - per-pair emotional deltas accumulated across
+// sessions. Only pairs relevant to the current chat are injected.
+export const PROMPT_KEY_RELATIONSHIPS = 'smart_memory_relationships';
 
 /** Valid type tags for long-term memory entries. */
 export const MEMORY_TYPES = ['fact', 'relationship', 'preference', 'event'];
@@ -77,7 +82,7 @@ export const META_KEY = 'smartMemory';
  * - Version 0 is the implicit state for any container that has no stored version
  *   (i.e. all data written by v1.3.0 or earlier, before this system existed).
  */
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 /**
  * Rough token estimate for a string. Uses the standard ~4 chars-per-token

@@ -51,6 +51,10 @@ import {
   injectMemories,
   loadCharacterMemories,
   clearCharacterMemories,
+  clearRelationshipHistory,
+  loadRelationshipHistory,
+  saveRelationshipHistory,
+  injectRelationshipHistory,
   isFreshStart,
   setFreshStart,
   getReadOnlyStartIndex,
@@ -87,6 +91,7 @@ import { showMemoryGraph } from './graph.js';
 import {
   setStatusMessage,
   updateLongTermUI,
+  updateRelationshipHistoryUI,
   updateSessionUI,
   updateScenesUI,
   updateArcsUI,
@@ -151,6 +156,14 @@ export const defaultSettings = {
   longterm_triggered_depth: 4,
   longterm_triggers_enabled: false,
   longterm_template: 'Memories from previous conversations:\n{{memories}}',
+
+  // Relationship history
+  relationships_enabled: true,
+  relationships_inject_budget: 250,
+  relationships_position: extension_prompt_types.IN_CHAT,
+  relationships_depth: 5,
+  relationships_role: extension_prompt_roles.SYSTEM,
+  relationships_template: 'Relationship history:\n{{relationships}}',
 
   // Session memory
   session_enabled: true,
@@ -254,9 +267,10 @@ const BUDGET_RATIOS = {
   longterm: 0.16,
   session: 0.13,
   scenes: 0.1,
-  arcs: 0.22,
-  canon: 0.26,
+  arcs: 0.18,
+  canon: 0.22,
   profiles: 0.13,
+  relationships: 0.08,
 };
 
 /**
@@ -272,7 +286,8 @@ function totalBudgetFromSettings(s) {
     (s.scene_inject_budget ?? 300) +
     (s.arcs_inject_budget ?? 700) +
     (s.canon_inject_budget ?? 800) +
-    (s.profiles_inject_budget ?? 400)
+    (s.profiles_inject_budget ?? 400) +
+    (s.relationships_inject_budget ?? 250)
   );
 }
 
@@ -291,6 +306,7 @@ function applyTotalBudget(total, s) {
   s.arcs_inject_budget = snap(total * BUDGET_RATIOS.arcs);
   s.canon_inject_budget = snap(total * BUDGET_RATIOS.canon);
   s.profiles_inject_budget = snap(total * BUDGET_RATIOS.profiles);
+  s.relationships_inject_budget = snap(total * BUDGET_RATIOS.relationships);
 }
 
 /**
@@ -545,6 +561,7 @@ export function bindSettingsUI(ctrl) {
     const selection = $(this).val() || null;
     ctrl.selectedGroupCharacter = selection;
     updateLongTermUI(ctrl.selectedGroupCharacter);
+    updateRelationshipHistoryUI(ctrl.selectedGroupCharacter);
     updateSessionUI();
     updateFreshStartUI(isFreshStart());
     updateCanonUI(ctrl.selectedGroupCharacter);
@@ -1184,6 +1201,109 @@ export function bindSettingsUI(ctrl) {
       saveSettingsDebounced();
     });
 
+  // ---- Relationship history controls ------------------------------------
+  $('#sm_relationships_enabled')
+    .prop('checked', s.relationships_enabled ?? true)
+    .on('change', function () {
+      extension_settings[MODULE_NAME].relationships_enabled = $(this).prop('checked');
+      saveSettingsDebounced();
+      const characterName = ctrl.getSelectedCharacterName();
+      injectRelationshipHistory(characterName);
+    });
+
+  $('#sm_relationships_inject_budget_value').text(s.relationships_inject_budget ?? 250);
+  $('#sm_relationships_inject_budget')
+    .val(s.relationships_inject_budget ?? 250)
+    .on('input', function () {
+      const v = parseInt($(this).val(), 10);
+      extension_settings[MODULE_NAME].relationships_inject_budget = v;
+      $('#sm_relationships_inject_budget_value').text(v);
+      saveSettingsDebounced();
+    });
+
+  $(`input[name="sm_relationships_position"][value="${s.relationships_position ?? 1}"]`).prop(
+    'checked',
+    true,
+  );
+  $('input[name="sm_relationships_position"]').on('change', function () {
+    extension_settings[MODULE_NAME].relationships_position = parseInt($(this).val(), 10);
+    saveSettingsDebounced();
+  });
+
+  $('#sm_relationships_depth')
+    .val(s.relationships_depth ?? 5)
+    .on('input', function () {
+      extension_settings[MODULE_NAME].relationships_depth = parseInt($(this).val(), 10);
+      saveSettingsDebounced();
+    });
+
+  $('#sm_relationships_role')
+    .val(s.relationships_role ?? 0)
+    .on('change', function () {
+      extension_settings[MODULE_NAME].relationships_role = parseInt($(this).val(), 10);
+      saveSettingsDebounced();
+    });
+
+  // ---- Relationship history panel buttons -----------------------------
+  $('#sm_add_relationship').on('click', function () {
+    $('#sm_relationship_add_form').removeData('editing').show();
+    $('#sm_rel_subject').val('').focus();
+    $('#sm_rel_target').val('');
+    $('#sm_rel_descriptors').val('');
+    $('#sm_rel_magnitude').val('low');
+  });
+
+  $('#sm_rel_cancel').on('click', function () {
+    $('#sm_relationship_add_form').removeData('editing').hide();
+  });
+
+  $('#sm_rel_save').on('click', function () {
+    const characterName = ctrl.getSelectedCharacterName();
+    if (!characterName) return;
+
+    const subject = $('#sm_rel_subject').val().trim();
+    const target = $('#sm_rel_target').val().trim();
+    const descriptorsRaw = $('#sm_rel_descriptors').val().trim();
+    const magnitude = $('#sm_rel_magnitude').val();
+
+    if (!subject || !target || !descriptorsRaw) return;
+
+    const descriptors = descriptorsRaw
+      .split(',')
+      .map((d) => d.trim())
+      .filter((d) => d.length > 0);
+    const key = `${subject}→${target}`;
+
+    const h = loadRelationshipHistory(characterName);
+
+    // If editing an existing pair under a different key, remove the old entry.
+    const editingKey = $('#sm_relationship_add_form').data('editing');
+    if (editingKey && editingKey !== key) delete h[editingKey];
+
+    h[key] = { descriptors, magnitude, updatedAt: Date.now() };
+    saveRelationshipHistory(characterName, h);
+    saveSettingsDebounced();
+    injectRelationshipHistory(characterName);
+    updateRelationshipHistoryUI(characterName);
+    $('#sm_relationship_add_form').removeData('editing').hide();
+  });
+
+  $('#sm_clear_relationships').on('click', async function () {
+    const characterName = ctrl.getSelectedCharacterName();
+    if (!characterName) return;
+    if (
+      !(await callGenericPopup(
+        `Clear all relationship history for "${characterName}"?`,
+        POPUP_TYPE.CONFIRM,
+      ))
+    )
+      return;
+    clearRelationshipHistory(characterName);
+    saveSettingsDebounced();
+    injectRelationshipHistory(null);
+    updateRelationshipHistoryUI(characterName);
+  });
+
   $('#sm_read_only').on('change', async function () {
     const val = $(this).prop('checked');
     await setFreshStart(val);
@@ -1250,6 +1370,7 @@ export function bindSettingsUI(ctrl) {
       const count = await extractAndStoreMemories(characterName, recentMessages);
       saveSettingsDebounced();
       updateLongTermUI(characterName);
+      updateRelationshipHistoryUI(characterName);
       setStatusMessage(
         count > 0
           ? `${count} new memor${count === 1 ? 'y' : 'ies'} saved.`
@@ -1271,11 +1392,14 @@ export function bindSettingsUI(ctrl) {
     if (!(await callGenericPopup(`Clear all memories for "${characterName}"?`, POPUP_TYPE.CONFIRM)))
       return;
     clearCharacterMemories(characterName);
+    clearRelationshipHistory(characterName);
     clearCanon(characterName);
     saveSettingsDebounced();
     updateLongTermUI(characterName);
     updateCanonUI(characterName);
+    updateRelationshipHistoryUI(characterName);
     injectMemories(null).catch(console.error);
+    injectRelationshipHistory(null);
     setStatusMessage('Memories cleared.');
   });
 
@@ -1906,6 +2030,7 @@ export function bindSettingsUI(ctrl) {
       injectArcs();
       injectProfiles(characterName);
       updateLongTermUI(characterName);
+      updateRelationshipHistoryUI(characterName);
       updateSessionUI();
       updateScenesUI();
       updateArcsUI();
@@ -2007,9 +2132,10 @@ export function bindSettingsUI(ctrl) {
     )
       return;
 
-    // Clear long-term memories and canon for the character.
+    // Clear long-term memories, relationship history, and canon for the character.
     if (characterName) {
       clearCharacterMemories(characterName);
+      clearRelationshipHistory(characterName);
       clearCanon(characterName);
       saveSettingsDebounced();
     }
@@ -2043,6 +2169,7 @@ export function bindSettingsUI(ctrl) {
 
     updateShortTermUI(null);
     updateLongTermUI(characterName);
+    updateRelationshipHistoryUI(characterName);
     updateFreshStartUI(isFreshStart());
     updateSessionUI();
     updateScenesUI();

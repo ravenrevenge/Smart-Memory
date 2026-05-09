@@ -24,21 +24,25 @@
  * new chat with the same character. A fresh-start flag in chatMetadata suppresses
  * extraction for a specific chat while keeping injection active.
  *
- * loadCharacterMemories    - returns the stored memory array for a character
- * saveCharacterMemories    - persists the memory array for a character
- * clearCharacterMemories   - deletes all memories for a character
- * formatMemoriesForPrompt  - formats the memory array as [type] content lines
- * extractAndStoreMemories  - runs extraction against recent messages and merges results;
- *                            also populates activation triggers for newly written memories
- * consolidateMemories      - evaluates unprocessed entries against the stable consolidated base per type
- * injectMemories           - pushes memories into the prompt via setExtensionPrompt;
- *                            memories whose triggers match the current turn are injected a second
- *                            time into PROMPT_KEY_TRIGGERED closer to the prompt
- * isFreshStart             - returns whether the current chat has fresh-start enabled
- * setFreshStart            - toggles the fresh-start flag and saves chatMetadata
- * getReadOnlyStartIndex    - returns the chat index at which read-only mode was last enabled
- * setReadOnlyStartIndex    - stores or clears the read-only window start index (also stores/clears readOnlyStartTime)
- * getReadOnlyStartTime     - returns the Unix ms timestamp at which read-only mode was last enabled
+ * loadCharacterMemories       - returns the stored memory array for a character
+ * saveCharacterMemories       - persists the memory array for a character
+ * clearCharacterMemories      - deletes all memories for a character
+ * formatMemoriesForPrompt     - formats the memory array as [type] content lines
+ * extractAndStoreMemories     - runs extraction against recent messages and merges results;
+ *                               also populates activation triggers and relationship deltas
+ * consolidateMemories         - evaluates unprocessed entries against the stable consolidated base per type
+ * injectMemories              - pushes memories into the prompt via setExtensionPrompt;
+ *                               memories whose triggers match the current turn are injected a second
+ *                               time into PROMPT_KEY_TRIGGERED closer to the prompt
+ * loadRelationshipHistory     - returns the relationship history map for a character
+ * saveRelationshipHistory     - persists the relationship history map for a character
+ * clearRelationshipHistory    - deletes the relationship history for a character
+ * injectRelationshipHistory   - pushes relevant relationship state into the prompt via PROMPT_KEY_RELATIONSHIPS
+ * isFreshStart                - returns whether the current chat has fresh-start enabled
+ * setFreshStart               - toggles the fresh-start flag and saves chatMetadata
+ * getReadOnlyStartIndex       - returns the chat index at which read-only mode was last enabled
+ * setReadOnlyStartIndex       - stores or clears the read-only window start index (also stores/clears readOnlyStartTime)
+ * getReadOnlyStartTime        - returns the Unix ms timestamp at which read-only mode was last enabled
  */
 
 import {
@@ -55,6 +59,7 @@ import {
   MODULE_NAME,
   PROMPT_KEY_LONG,
   PROMPT_KEY_TRIGGERED,
+  PROMPT_KEY_RELATIONSHIPS,
   MEMORY_TYPES,
   META_KEY,
 } from './constants.js';
@@ -70,8 +75,13 @@ import {
   buildLongtermConsolidationPrompt,
   buildSupersessionConfirmPrompt,
   buildTriggerGenerationPrompt,
+  buildRelationshipDeltaPrompt,
 } from './prompts.js';
-import { parseExtractionOutput, parseTriggerResponse } from './parsers.js';
+import {
+  parseExtractionOutput,
+  parseTriggerResponse,
+  parseRelationshipDeltaResponse,
+} from './parsers.js';
 import {
   prioritizeMemories,
   hybridPrioritize,
@@ -252,6 +262,49 @@ export function clearCharacterMemories(characterName) {
   if (extension_settings[MODULE_NAME].characters?.[characterName]) {
     delete extension_settings[MODULE_NAME].characters[characterName];
   }
+}
+
+// ---- Relationship history storage ---------------------------------------
+
+/**
+ * Returns the relationship history map for a character, or an empty object
+ * if none exists yet. Keys are "subject→target" strings; values are
+ * { descriptors: string[], magnitude: string, updatedAt: number }.
+ * @param {string} characterName
+ * @returns {Object}
+ */
+export function loadRelationshipHistory(characterName) {
+  if (!characterName) return {};
+  return extension_settings[MODULE_NAME].characters?.[characterName]?.relationship_history ?? {};
+}
+
+/**
+ * Persists a relationship history map for a character into extension_settings.
+ * Caller must call saveSettingsDebounced() afterwards.
+ * @param {string} characterName
+ * @param {Object} history - Map of "subject→target" keys to state objects.
+ */
+export function saveRelationshipHistory(characterName, history) {
+  if (!characterName || typeof history !== 'object') return;
+  if (!extension_settings[MODULE_NAME].characters) {
+    extension_settings[MODULE_NAME].characters = {};
+  }
+  const existing = extension_settings[MODULE_NAME].characters[characterName] ?? {};
+  extension_settings[MODULE_NAME].characters[characterName] = {
+    ...existing,
+    relationship_history: history,
+  };
+}
+
+/**
+ * Removes the relationship history for a character from extension_settings.
+ * Caller must call saveSettingsDebounced() afterwards.
+ * @param {string} characterName
+ */
+export function clearRelationshipHistory(characterName) {
+  if (!characterName) return;
+  const char = extension_settings[MODULE_NAME].characters?.[characterName];
+  if (char) delete char.relationship_history;
 }
 
 // ---- Formatting ---------------------------------------------------------
@@ -532,6 +585,40 @@ export async function extractAndStoreMemories(characterName, recentMessages) {
           smLog(`[SmartMemory] Trigger generation failed: ${err.message}`);
           mem.triggers = [];
         }
+      }
+    }
+
+    // Relationship delta extraction: runs after memory extraction so newly
+    // added memories are already in finalActive and entity names are known.
+    // Sequential like trigger generation to avoid OOM on limited VRAM.
+    {
+      const relHistory = loadRelationshipHistory(characterName);
+
+      // Build the current-state string from stored history for the prompt baseline.
+      const stateLines = Object.entries(relHistory)
+        .map(([pair, state]) => `${pair}: ${(state.descriptors ?? []).join(', ')}`)
+        .join('\n');
+
+      // Extract the character card description for seeding new pairs.
+      const relContext = getContext();
+      const cardChar = relContext.characters?.find((c) => c.name === characterName);
+      const cardExcerpt = cardChar?.description ?? '';
+
+      try {
+        const relPrompt = buildRelationshipDeltaPrompt(chatHistory, stateLines, cardExcerpt);
+        const relResponse = await generateMemoryExtract(relPrompt, { responseLength: 150 });
+        const deltas = parseRelationshipDeltaResponse(relResponse);
+
+        if (deltas.length > 0) {
+          for (const { subject, target, descriptors, magnitude } of deltas) {
+            const key = `${subject}→${target}`;
+            relHistory[key] = { descriptors, magnitude, updatedAt: Date.now() };
+          }
+          saveRelationshipHistory(characterName, relHistory);
+          smLog(`[SmartMemory] Relationship deltas applied: ${deltas.length} pair(s)`);
+        }
+      } catch (err) {
+        smLog(`[SmartMemory] Relationship extraction failed: ${err.message}`);
       }
     }
 
@@ -926,6 +1013,106 @@ export async function injectMemories(characterName, updateTelemetry = false) {
   } else {
     setExtensionPrompt(PROMPT_KEY_TRIGGERED, '', extension_prompt_types.NONE, 0);
   }
+}
+
+// ---- Relationship history injection ------------------------------------
+
+/**
+ * Injects the current relationship history for a character into the prompt.
+ * Only pairs whose names appear in the recent chat messages or are currently
+ * in the active group are included - dormant relationships are not injected.
+ *
+ * Clears the slot when relationships are disabled, the character is unknown,
+ * or no relevant pairs exist.
+ *
+ * @param {string|null} characterName - Current character name.
+ * @param {boolean} [updateTelemetry=false] - Whether to update the token usage bar.
+ */
+export function injectRelationshipHistory(characterName, updateTelemetry = false) {
+  const settings = extension_settings[MODULE_NAME];
+
+  const clear = () => {
+    setExtensionPrompt(PROMPT_KEY_RELATIONSHIPS, '', extension_prompt_types.NONE, 0);
+    if (updateTelemetry) updateRelationshipTelemetry(0);
+  };
+
+  if (!settings.relationships_enabled || !characterName) return clear();
+
+  const history = loadRelationshipHistory(characterName);
+  const pairs = Object.entries(history);
+  if (pairs.length === 0) return clear();
+
+  // Build a set of names mentioned in recent messages to filter relevant pairs.
+  const context = getContext();
+  const recentMsgs = (context.chat ?? []).slice(-10);
+  const recentText = recentMsgs
+    .map((m) => m.mes || '')
+    .join(' ')
+    .toLowerCase();
+
+  // Also include names of characters currently in a group chat.
+  const groupNames = new Set();
+  if (context.groupId) {
+    const group = context.groups?.find((g) => g.id === context.groupId);
+    if (group) {
+      for (const avatarId of group.members ?? []) {
+        const c = context.characters?.find((ch) => ch.avatar === avatarId);
+        if (c?.name) groupNames.add(c.name.toLowerCase());
+      }
+    }
+  }
+
+  // A pair is relevant if either name appears in recent text or current group.
+  const relevant = pairs.filter(([key]) => {
+    const [subject, target] = key.split('→').map((s) => s.trim().toLowerCase());
+    return (
+      recentText.includes(subject) ||
+      recentText.includes(target) ||
+      groupNames.has(subject) ||
+      groupNames.has(target)
+    );
+  });
+
+  if (relevant.length === 0) return clear();
+
+  const budget = settings.relationships_inject_budget ?? 250;
+  const lines = [];
+  let tokens = 0;
+  for (const [key, state] of relevant) {
+    const line = `${key}: ${(state.descriptors ?? []).join(', ')}`;
+    const lineTokens = estimateTokens(line);
+    if (tokens + lineTokens > budget) break;
+    lines.push(line);
+    tokens += lineTokens;
+  }
+
+  if (lines.length === 0) return clear();
+
+  const template = settings.relationships_template || 'Relationship history:\n{{relationships}}';
+  const content = template.replace('{{relationships}}', lines.join('\n'));
+
+  setExtensionPrompt(
+    PROMPT_KEY_RELATIONSHIPS,
+    content,
+    settings.relationships_position ?? extension_prompt_types.IN_CHAT,
+    settings.relationships_depth ?? 5,
+    false,
+    settings.relationships_role ?? extension_prompt_roles.SYSTEM,
+  );
+
+  if (updateTelemetry) updateRelationshipTelemetry(estimateTokens(content));
+}
+
+/**
+ * Stub called when relationship telemetry needs updating.
+ * The actual token bar update is wired in ui.js via the updateTelemetry callback.
+ * This is a no-op here - the token bar is updated by the caller passing updateTelemetry=true
+ * which triggers the ui.js side via the existing telemetry refresh path.
+ * @param {number} _tokens
+ */
+function updateRelationshipTelemetry(_tokens) {
+  // Telemetry is handled by the existing refreshTokenBar call in index.js
+  // after each injection cycle. No separate wiring needed here.
 }
 
 // ---- Fresh-start helpers ------------------------------------------------

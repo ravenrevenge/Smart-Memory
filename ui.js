@@ -32,7 +32,8 @@
  * initTooltips            - wires up the floating tooltip on .sm-info elements
  * updateShortTermUI       - syncs the short-term summary textarea
  * updateCanonUI           - populates the canon display and status line
- * updateLongTermUI        - re-renders the long-term memories list and entity panel
+ * updateLongTermUI             - re-renders the long-term memories list and entity panel
+ * updateRelationshipHistoryUI  - re-renders the relationship history panel with edit/delete/add controls
  * buildTypePicker         - builds a custom type-picker widget
  * initTypePickers         - registers the document-level close handler for type pickers
  * updateEmbeddingNotice   - shows/hides the embedding inactive notice
@@ -61,8 +62,16 @@ import {
   PROMPT_KEY_SCENES,
   PROMPT_KEY_ARCS,
   PROMPT_KEY_PROFILES,
+  PROMPT_KEY_RELATIONSHIPS,
 } from './constants.js';
-import { loadCharacterMemories, saveCharacterMemories, injectMemories } from './longterm.js';
+import {
+  loadCharacterMemories,
+  saveCharacterMemories,
+  injectMemories,
+  loadRelationshipHistory,
+  saveRelationshipHistory,
+  injectRelationshipHistory,
+} from './longterm.js';
 import { loadSessionMemories, saveSessionMemories, injectSessionMemories } from './session.js';
 import { loadSceneHistory } from './scenes.js';
 import {
@@ -132,6 +141,7 @@ export const TOKEN_TIERS = [
   { key: PROMPT_KEY_SCENES, label: 'Scenes', color: '#a07840' },
   { key: PROMPT_KEY_ARCS, label: 'Arcs', color: '#7a6ea5' },
   { key: PROMPT_KEY_PROFILES, label: 'Profiles', color: '#5a9ea0' },
+  { key: PROMPT_KEY_RELATIONSHIPS, label: 'Relationships', color: '#c87941' },
 ];
 
 // Personal tiers shown in per-character group rows. Shared tiers (session,
@@ -459,6 +469,67 @@ export function updateLongTermUI(characterName) {
   const memories = characterName ? loadCharacterMemories(characterName) : [];
   renderMemoriesList(memories, characterName);
   updateEntityPanel(characterName);
+}
+
+/**
+ * Renders the relationship history panel for the given character.
+ * Each pair is shown as an editable row with subject, arrow, target,
+ * descriptors, magnitude, and delete/edit controls.
+ * @param {string|null} characterName
+ */
+export function updateRelationshipHistoryUI(characterName) {
+  const $list = $('#sm_relationships_list');
+  $list.empty();
+
+  const history = characterName ? loadRelationshipHistory(characterName) : {};
+  const pairs = Object.entries(history);
+
+  if (pairs.length === 0) {
+    $list.append('<div class="sm_no_char">No relationship history yet.</div>');
+    return;
+  }
+
+  for (const [key, state] of pairs) {
+    const [subject, target] = key.split('→').map((s) => s.trim());
+    const descriptors = (state.descriptors ?? []).join(', ');
+    const magnitude = state.magnitude ?? 'low';
+
+    const $row = $('<div class="sm_memory_item">');
+
+    const $content = $('<div class="sm_memory_content">').text(
+      `${subject} → ${target}: ${descriptors} [${magnitude}]`,
+    );
+
+    const $editBtn = $('<button class="sm_memory_action menu_button" title="Edit">')
+      .append('<i class="fa-solid fa-pencil"></i>')
+      .on('click', () => {
+        // Populate the add form for editing this pair.
+        $('#sm_rel_subject').val(subject);
+        $('#sm_rel_target').val(target);
+        $('#sm_rel_descriptors').val(descriptors);
+        $('#sm_rel_magnitude').val(magnitude);
+        $('#sm_relationship_add_form').show();
+        // Store the key being edited so save can delete the old one.
+        $('#sm_relationship_add_form').data('editing', key);
+        $('#sm_rel_subject').focus();
+      });
+
+    const $deleteBtn = $(
+      '<button class="sm_memory_action sm_memory_delete menu_button" title="Delete">',
+    )
+      .append('<i class="fa-solid fa-trash-can"></i>')
+      .on('click', async () => {
+        const h = loadRelationshipHistory(characterName);
+        delete h[key];
+        saveRelationshipHistory(characterName, h);
+        saveSettingsDebounced();
+        injectRelationshipHistory(characterName);
+        updateRelationshipHistoryUI(characterName);
+      });
+
+    $row.append($content, $editBtn, $deleteBtn);
+    $list.append($row);
+  }
 }
 
 /**
@@ -941,7 +1012,7 @@ export function updateProfilesUI(profiles) {
   const sections = [
     { key: 'character_state', label: 'Character state' },
     { key: 'world_state', label: 'World state' },
-    { key: 'relationship_matrix', label: 'Relationships' },
+    { key: 'relationship_matrix', label: 'Current Relationships' },
   ];
 
   let hasContent = false;

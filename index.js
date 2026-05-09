@@ -59,6 +59,7 @@ import {
   PROMPT_KEY_PROFILES,
   PROMPT_KEY_CANON,
   PROMPT_KEY_TRIGGERED,
+  PROMPT_KEY_RELATIONSHIPS,
 } from './constants.js';
 import { memory_sources, abortCurrentMemoryGeneration } from './generate.js';
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
@@ -76,6 +77,7 @@ import {
   injectMemories,
   loadCharacterMemories,
   isFreshStart,
+  injectRelationshipHistory,
 } from './longterm.js';
 import { updateLastActive, getAwayHours, generateRecap, displayRecap } from './recap.js';
 import {
@@ -358,6 +360,7 @@ function clearAllInjections() {
   setExtensionPrompt(PROMPT_KEY_PROFILES, '', none, 0);
   setExtensionPrompt(PROMPT_KEY_CANON, '', none, 0);
   setExtensionPrompt(PROMPT_KEY_TRIGGERED, '', none, 0);
+  setExtensionPrompt(PROMPT_KEY_RELATIONSHIPS, '', none, 0);
   clearUnifiedSlot();
   updateTokenDisplay();
 }
@@ -695,6 +698,7 @@ async function onCharacterMessageRendered() {
           // Inject once after extraction (and any consolidation) - this is the
           // one call per AI response turn where telemetry should be updated.
           await injectMemories(characterName, true);
+          injectRelationshipHistory(characterName);
           updateLongTermUI(characterName);
           total += count;
         }
@@ -937,6 +941,7 @@ async function onChatChangedImpl() {
     // are migrated lazily on their first onGroupMemberDrafted.
     if (selectedGroupCharacter) ensureCharacterMigrated(selectedGroupCharacter);
     await injectMemories(selectedGroupCharacter);
+    injectRelationshipHistory(selectedGroupCharacter);
     await injectSessionMemories();
     injectCanon(selectedGroupCharacter);
     injectProfiles(selectedGroupCharacter);
@@ -1020,6 +1025,7 @@ async function onChatChangedImpl() {
   updateShortTermUI(summary);
 
   await injectMemories(characterName);
+  injectRelationshipHistory(characterName);
 
   await injectSessionMemories();
   injectSceneHistory();
@@ -1181,6 +1187,7 @@ async function onGroupMemberDrafted(chId) {
   updateShortTermUI(summary);
 
   await injectMemories(characterName);
+  injectRelationshipHistory(characterName);
   await injectSessionMemories();
   injectSceneHistory();
   injectArcs();
@@ -1620,6 +1627,7 @@ async function onGroupWrapperFinished({ type } = {}) {
   // so the token display reflects what the panel is showing, not who generated last.
   if (selectedGroupCharacter) {
     await injectMemories(selectedGroupCharacter);
+    injectRelationshipHistory(selectedGroupCharacter);
     injectCanon(selectedGroupCharacter);
     injectProfiles(selectedGroupCharacter);
     maybeInjectUnified();
@@ -1856,6 +1864,7 @@ jQuery(async function () {
             await extractSessionMemories(recentSession);
           }
           await injectMemories(characterName);
+          injectRelationshipHistory(characterName);
           await injectSessionMemories();
           injectArcs();
           updateLongTermUI(characterName);

@@ -40,6 +40,7 @@
  * buildCanonSummaryPrompt          - generates a stable per-character canon narrative from arc summaries and memories
  * buildSupersessionConfirmPrompt   - binary UPDATE/INDEPENDENT prompt for model-confirmed supersession (method B)
  * buildTriggerGenerationPrompt     - asks the model for contextual trigger keywords for a single memory (Profile B)
+ * buildRelationshipDeltaPrompt     - extracts per-pair relationship state changes with magnitude from a scene
  *
  * Entity tagging: both extraction prompts instruct the model to append an
  * optional `:entity=Name1,Name2` suffix to the bracket tag for any memory
@@ -723,6 +724,54 @@ export function buildTriggerGenerationPrompt(content) {
     `- Emotional or physical reactions associated with this memory\n\n` +
     `Do NOT repeat words already in the memory text. Output short single words or two-word phrases only.\n\n` +
     `Output format: keyword1, keyword2, keyword3\n` +
+    `Output:`
+  );
+}
+
+/**
+ * Builds the prompt for relationship delta extraction.
+ *
+ * Given a scene and the current baseline relationship state for known pairs,
+ * the model outputs one line per pair that changed, in the format:
+ *   subject->target: descriptor, descriptor, magnitude=low|medium|high
+ *
+ * For new character pairs with no prior state, the caller may include a
+ * character card excerpt so the model can seed the initial state from it.
+ * If the pair is introduced mid-scene the model seeds from the prose instead.
+ *
+ * Magnitude guidelines:
+ *   low    - minor shift: a kind gesture, a small disagreement
+ *   medium - notable event: a confession, a betrayal discovered, a reconciliation
+ *   high   - life-changing or traumatic: murder, profound loss, years of bonding
+ *
+ * @param {string} sceneText - The scene messages to analyze.
+ * @param {string} currentState - Current baselines, one "A->B: descriptors" line per known pair. Empty string if none.
+ * @param {string} characterCardExcerpt - Relevant character card text for seeding new pairs. Empty string if not available.
+ * @returns {string} The assembled prompt.
+ */
+export function buildRelationshipDeltaPrompt(sceneText, currentState, characterCardExcerpt = '') {
+  const cardSection = characterCardExcerpt.trim()
+    ? `Character background (use only to seed relationships with no prior state):\n${characterCardExcerpt.trim()}\n\n`
+    : '';
+  const stateSection = currentState.trim()
+    ? `Current relationship state (update only pairs that changed - do not repeat unchanged pairs):\n${currentState.trim()}\n\n`
+    : '';
+
+  return (
+    `[RELATIONSHIP EXTRACTION TASK - Output structured data only. Do NOT continue the roleplay.]\n\n` +
+    `Extract relationship state changes from the scene below. For each character pair where a relationship exists or changes, output one line:\n\n` +
+    `subject->target: descriptor, descriptor, magnitude=low|medium|high\n\n` +
+    `Rules:\n` +
+    `- subject is the character whose feelings/perspective are described\n` +
+    `- descriptors are short words describing the current emotional state (e.g. warm, hostile, suspicious, grateful, fearful, indebted, cautious)\n` +
+    `- magnitude: low = minor shift, medium = notable event, high = life-changing or traumatic\n` +
+    `- A->B and B->A are separate lines if they differ\n` +
+    `- Include characters introduced mid-scene if the prose establishes a clear relationship\n` +
+    `- Do not include pets, animals, or unnamed background characters\n` +
+    `- Output NONE if no relationships can be extracted\n\n` +
+    cardSection +
+    stateSection +
+    `Scene:\n${sceneText}\n\n` +
     `Output:`
   );
 }

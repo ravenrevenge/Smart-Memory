@@ -33,7 +33,8 @@
  * formatSummary             - strips model analysis scaffolding and extracts the summary text
  * detectSceneBreakHeuristic - pattern-based scene break check, no model call required
  * parseProfileOutput        - extracts character_state, world_state, and relationship_matrix from profile generation output
- * parseTriggerResponse      - parses the comma-separated keyword list from a trigger generation response
+ * parseTriggerResponse           - parses the comma-separated keyword list from a trigger generation response
+ * parseRelationshipDeltaResponse - parses per-pair relationship state changes with magnitude from a delta response
  *
  * All new memory objects produced by the parse functions carry the full graph
  * field set (id, source_messages, entities, time_scope, valid_from, valid_to,
@@ -444,6 +445,63 @@ export function parseTriggerResponse(response, memoryContent) {
     )
     .filter((t) => t.length >= 3 && t.length <= 40 && /[a-z]/.test(t) && !contentWords.has(t))
     .slice(0, 8);
+}
+
+// ---- Relationship delta parser ------------------------------------------
+
+// Matches lines like "Senjin->Asher: warm, cautious, magnitude=medium"
+// The arrow can be -> or the unicode → character.
+const RELATIONSHIP_LINE_RE = /^([^→-]+?)\s*(?:->|→)\s*([^:]+?)\s*:\s*(.+)$/;
+const MAGNITUDE_RE = /magnitude\s*=\s*(low|medium|high)/i;
+
+/**
+ * Parses the model's relationship delta response into an array of state objects.
+ *
+ * Each output object has the shape:
+ *   { subject: string, target: string, descriptors: string[], magnitude: string }
+ *
+ * Lines that do not match the expected format are silently skipped.
+ * Output NONE from the model produces an empty array.
+ *
+ * @param {string} response - Raw model output from buildRelationshipDeltaPrompt.
+ * @returns {Array<{subject: string, target: string, descriptors: string[], magnitude: string}>}
+ */
+export function parseRelationshipDeltaResponse(response) {
+  const lines = String(response || '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l && l.toUpperCase() !== 'NONE');
+
+  const results = [];
+  for (const line of lines) {
+    const match = RELATIONSHIP_LINE_RE.exec(line);
+    if (!match) continue;
+
+    const subject = match[1].trim();
+    const target = match[2].trim();
+    const rest = match[3].trim();
+
+    const magnitudeMatch = MAGNITUDE_RE.exec(rest);
+    const magnitude = magnitudeMatch ? magnitudeMatch[1].toLowerCase() : 'low';
+
+    // Strip the magnitude tag and parse remaining comma-separated descriptors.
+    const descriptors = rest
+      .replace(MAGNITUDE_RE, '')
+      .split(',')
+      .map((d) =>
+        d
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z\s-]/g, '')
+          .trim(),
+      )
+      .filter((d) => d.length > 0);
+
+    if (subject && target && descriptors.length > 0) {
+      results.push({ subject, target, descriptors, magnitude });
+    }
+  }
+  return results;
 }
 
 // ---- Scene break heuristics ---------------------------------------------
