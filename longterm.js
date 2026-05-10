@@ -595,8 +595,14 @@ export async function extractAndStoreMemories(characterName, recentMessages, sta
       const relHistory = loadRelationshipHistory(characterName);
 
       // Build the current-state string from stored history for the prompt baseline.
+      // Format: "pair: word(magnitude), word(magnitude)" so the model sees existing magnitudes.
       const stateLines = Object.entries(relHistory)
-        .map(([pair, state]) => `${pair}: ${(state.descriptors ?? []).join(', ')}`)
+        .map(([pair, state]) => {
+          const descStr = (state.descriptors ?? [])
+            .map((d) => `${d.word}(${d.magnitude})`)
+            .join(', ');
+          return `${pair}: ${descStr}`;
+        })
         .join('\n');
 
       // Extract the character card description for seeding new pairs.
@@ -624,9 +630,24 @@ export async function extractAndStoreMemories(characterName, recentMessages, sta
         );
 
         if (relevant.length > 0) {
-          for (const { subject, target, descriptors, magnitude } of relevant) {
+          for (const { subject, target, updates, removals } of relevant) {
             const key = `${subject}→${target}`;
-            relHistory[key] = { descriptors, magnitude, updatedAt: Date.now() };
+            const existing = relHistory[key] ?? { descriptors: [], updatedAt: Date.now() };
+
+            // Build a word->magnitude map from the current stored state.
+            const descMap = new Map((existing.descriptors ?? []).map((d) => [d.word, d.magnitude]));
+
+            // Apply removals first, then add/update.
+            for (const word of removals) descMap.delete(word);
+            for (const { word, magnitude } of updates) descMap.set(word, magnitude);
+
+            relHistory[key] = {
+              descriptors: Array.from(descMap.entries()).map(([word, magnitude]) => ({
+                word,
+                magnitude,
+              })),
+              updatedAt: Date.now(),
+            };
           }
           saveRelationshipHistory(characterName, relHistory);
           smLog(`[SmartMemory] Relationship deltas applied: ${relevant.length} pair(s)`);
@@ -1093,7 +1114,7 @@ export function injectRelationshipHistory(characterName, updateTelemetry = false
   const lines = [];
   let tokens = 0;
   for (const [key, state] of relevant) {
-    const line = `${key}: ${(state.descriptors ?? []).join(', ')}`;
+    const line = `${key}: ${(state.descriptors ?? []).map((d) => `${d.word}(${d.magnitude})`).join(', ')}`;
     const lineTokens = estimateTokens(line);
     if (tokens + lineTokens > budget) break;
     lines.push(line);

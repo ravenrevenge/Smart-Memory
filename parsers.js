@@ -449,26 +449,30 @@ export function parseTriggerResponse(response, memoryContent) {
 
 // ---- Relationship delta parser ------------------------------------------
 
-// Matches lines like "Senjin->Asher: warm, cautious, magnitude=medium"
+// Matches lines like "Senjin -> Asher: warm(high), cautious(low)"
 // The arrow can be -> or the unicode → character.
 const RELATIONSHIP_LINE_RE = /^([^→-]+?)\s*(?:->|→)\s*([^:]+?)\s*:\s*(.+)$/;
-// Matches explicit "magnitude=X" syntax.
-const MAGNITUDE_RE = /magnitude\s*=\s*(low|medium|high)/i;
-// Matches a bare magnitude keyword when the model skips the "magnitude=" prefix.
-const MAGNITUDE_BARE_RE = /(?:^|,)\s*(low|medium|high)\s*(?:,|$)/i;
+// Matches the inline magnitude suffix: word(low|medium|high)
+const INLINE_MAGNITUDE_RE = /\((\s*low|medium|high\s*)\)/i;
 const MAGNITUDE_KEYWORDS = new Set(['low', 'medium', 'high']);
+// Transitional phrases the model sometimes uses to describe change - strip them.
+const TRANSITION_RE =
+  /\b(?:then\s+(?:more\s+)?|increasingly\s+|still\s+|even\s+more\s+|becoming\s+(?:more\s+)?)/gi;
 
 /**
- * Parses the model's relationship delta response into an array of state objects.
+ * Parses the model's relationship delta response into an array of update objects.
  *
  * Each output object has the shape:
- *   { subject: string, target: string, descriptors: string[], magnitude: string }
+ *   { subject: string, target: string, updates: Array<{word, magnitude}>, removals: string[] }
+ *
+ * updates  - descriptors to add or update (with per-word magnitudes)
+ * removals - descriptor words prefixed with ! that should be removed from the stored state
  *
  * Lines that do not match the expected format are silently skipped.
  * Output NONE from the model produces an empty array.
  *
  * @param {string} response - Raw model output from buildRelationshipDeltaPrompt.
- * @returns {Array<{subject: string, target: string, descriptors: string[], magnitude: string}>}
+ * @returns {Array<{subject: string, target: string, updates: Array<{word: string, magnitude: string}>, removals: string[]}>}
  */
 export function parseRelationshipDeltaResponse(response) {
   const lines = String(response || '')
@@ -485,32 +489,43 @@ export function parseRelationshipDeltaResponse(response) {
     const target = match[2].trim();
     const rest = match[3].trim();
 
-    // Prefer explicit "magnitude=X" syntax; fall back to a bare keyword.
-    const magnitudeMatch = MAGNITUDE_RE.exec(rest) ?? MAGNITUDE_BARE_RE.exec(rest);
-    const magnitude = magnitudeMatch ? magnitudeMatch[1].toLowerCase() : 'low';
+    const updates = [];
+    const removals = [];
 
-    // Strip whichever magnitude form was matched, then parse remaining descriptors.
-    // Also strip transitional phrases the model uses to describe change over multiple
-    // passes ("then more X", "increasingly X", "still X") - we only want the current state word.
-    const descriptors = rest
-      .replace(MAGNITUDE_RE, '')
-      .replace(MAGNITUDE_BARE_RE, ',')
-      .split(',')
-      .map((d) =>
-        d
-          .trim()
-          .toLowerCase()
-          .replace(
-            /\b(?:then\s+(?:more\s+)?|increasingly\s+|still\s+|even\s+more\s+|becoming\s+(?:more\s+)?)/g,
-            '',
-          )
+    for (const token of rest.split(',')) {
+      const raw = token.trim();
+      if (!raw) continue;
+
+      // Removal marker: !descriptor
+      if (raw.startsWith('!')) {
+        const word = raw
+          .slice(1)
+          .replace(INLINE_MAGNITUDE_RE, '')
+          .replace(TRANSITION_RE, '')
           .replace(/[^a-z\s-]/g, '')
-          .trim(),
-      )
-      .filter((d) => d.length > 0 && !MAGNITUDE_KEYWORDS.has(d));
+          .trim()
+          .toLowerCase();
+        if (word) removals.push(word);
+        continue;
+      }
 
-    if (subject && target && descriptors.length > 0) {
-      results.push({ subject, target, descriptors, magnitude });
+      // Parse inline magnitude: word(medium) or word (medium)
+      const magMatch = INLINE_MAGNITUDE_RE.exec(raw);
+      const magnitude = magMatch ? magMatch[1].trim().toLowerCase() : 'medium';
+      const word = raw
+        .replace(INLINE_MAGNITUDE_RE, '')
+        .replace(TRANSITION_RE, '')
+        .replace(/[^a-z\s-]/g, '')
+        .trim()
+        .toLowerCase();
+
+      if (word && !MAGNITUDE_KEYWORDS.has(word)) {
+        updates.push({ word, magnitude });
+      }
+    }
+
+    if (subject && target && (updates.length > 0 || removals.length > 0)) {
+      results.push({ subject, target, updates, removals });
     }
   }
   return results;

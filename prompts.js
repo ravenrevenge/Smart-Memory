@@ -751,24 +751,33 @@ export function buildTriggerGenerationPrompt(content) {
  */
 export function buildRelationshipDeltaPrompt(sceneText, currentState, characterCardExcerpt = '') {
   const cardSection = characterCardExcerpt.trim()
-    ? `Character background (use only to seed relationships with no prior state):\n${characterCardExcerpt.trim()}\n\n`
+    ? `Character background (use only to seed new pairs with no prior state):\n${characterCardExcerpt.trim()}\n\n`
     : '';
   const stateSection = currentState.trim()
-    ? `Current relationship state (update only pairs that changed - do not repeat unchanged pairs):\n${currentState.trim()}\n\n`
+    ? `Current relationship state (carry ALL of these forward unless explicitly resolved):\n${currentState.trim()}\n\n`
     : '';
 
   return (
-    `[RELATIONSHIP EXTRACTION TASK - Output structured data only. Do NOT continue the roleplay.]\n\n` +
-    `Extract relationship state changes from the scene below. For each character pair where a relationship exists or changes, output one line:\n\n` +
-    `subject->target: descriptor, descriptor, magnitude=low|medium|high\n\n` +
+    `[RELATIONSHIP HISTORY TASK - Output structured data only. Do NOT continue the roleplay.]\n\n` +
+    `You maintain a relationship history record. The existing state lists what is already known and TRUE.\n` +
+    `Your job is to output the updated state by:\n` +
+    `1. Keeping ALL existing descriptors (they remain true unless the scene proves otherwise)\n` +
+    `2. Adding any new descriptors observed in the scene\n` +
+    `3. Prefixing a descriptor with ! only if the scene explicitly resolves it\n\n` +
+    `Example:\n` +
+    `Existing: Alice -> Bob: fond(high), nervous(medium)\n` +
+    `Scene: Alice confesses her feelings. Bob smiles and takes her hand.\n` +
+    `Output: Alice -> Bob: fond(high), nervous(medium), open(high)\n` +
+    `(fond and nervous are kept because they are still true; open is added)\n\n` +
     `Rules:\n` +
-    `- subject is the character whose feelings/perspective are described\n` +
-    `- descriptors are short words describing the current emotional state (e.g. warm, hostile, suspicious, grateful, fearful, indebted, cautious)\n` +
-    `- magnitude: low = minor shift, medium = notable event, high = life-changing or traumatic\n` +
-    `- A->B and B->A are separate lines if they differ\n` +
-    `- Include characters introduced mid-scene if the prose establishes a clear relationship\n` +
+    `- subject -> target and target -> subject are separate lines - feelings are not always mutual\n` +
+    `- Each descriptor gets its own magnitude: (low), (medium), or (high)\n` +
+    `- high = deep or persistent; medium = notable; low = mild or fleeting\n` +
+    `- Only output pairs where at least one party appears in the scene\n` +
+    `- Include new pairs introduced mid-scene if the prose establishes a clear relationship\n` +
     `- Do not include pets, animals, or unnamed background characters\n` +
-    `- Output NONE if no relationships can be extracted\n\n` +
+    `- Output NONE if no relevant pairs appear in the scene\n\n` +
+    `Format: Subject -> Target: descriptor(magnitude), descriptor(magnitude)\n\n` +
     cardSection +
     stateSection +
     `Scene:\n${sceneText}\n\n` +

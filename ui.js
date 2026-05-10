@@ -491,13 +491,16 @@ export function updateRelationshipHistoryUI(characterName) {
 
   for (const [key, state] of pairs) {
     const [subject, target] = key.split('→').map((s) => s.trim());
-    const descriptors = (state.descriptors ?? []).join(', ');
-    const magnitude = state.magnitude ?? 'low';
+    const descriptors = state.descriptors ?? [];
+    // Display as "word(magnitude), word(magnitude)" for per-descriptor magnitudes.
+    const descriptorStr = descriptors.map((d) => `${d.word}(${d.magnitude})`).join(', ');
+    // For the edit form, serialize as "word(magnitude), ..." so it round-trips cleanly.
+    const descriptorFieldVal = descriptorStr;
 
     const $row = $('<div class="sm_memory_item">');
 
     const $content = $('<div class="sm_memory_content">').text(
-      `${subject} → ${target}: ${descriptors} [${magnitude}]`,
+      `${subject} → ${target}: ${descriptorStr}`,
     );
 
     const $editBtn = $('<button class="sm_memory_action menu_button" title="Edit">')
@@ -506,8 +509,7 @@ export function updateRelationshipHistoryUI(characterName) {
         // Populate the add form for editing this pair.
         $('#sm_rel_subject').val(subject);
         $('#sm_rel_target').val(target);
-        $('#sm_rel_descriptors').val(descriptors);
-        $('#sm_rel_magnitude').val(magnitude);
+        $('#sm_rel_descriptors').val(descriptorFieldVal);
         $('#sm_relationship_add_form').show();
         // Store the key being edited so save can delete the old one.
         $('#sm_relationship_add_form').data('editing', key);

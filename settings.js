@@ -1250,7 +1250,6 @@ export function bindSettingsUI(ctrl) {
     $('#sm_rel_subject').val('').focus();
     $('#sm_rel_target').val('');
     $('#sm_rel_descriptors').val('');
-    $('#sm_rel_magnitude').val('low');
   });
 
   $('#sm_rel_cancel').on('click', function () {
@@ -1264,14 +1263,29 @@ export function bindSettingsUI(ctrl) {
     const subject = $('#sm_rel_subject').val().trim();
     const target = $('#sm_rel_target').val().trim();
     const descriptorsRaw = $('#sm_rel_descriptors').val().trim();
-    const magnitude = $('#sm_rel_magnitude').val();
 
     if (!subject || !target || !descriptorsRaw) return;
 
+    // Parse "word(magnitude), word(magnitude)" format. Words without an explicit
+    // magnitude get the default "medium".
+    const VALID_MAGNITUDES = new Set(['low', 'medium', 'high']);
     const descriptors = descriptorsRaw
       .split(',')
-      .map((d) => d.trim())
-      .filter((d) => d.length > 0);
+      .map((t) => t.trim())
+      .filter((t) => t.length > 0)
+      .map((t) => {
+        const m = /\((\s*low|medium|high\s*)\)/i.exec(t);
+        const magnitude = m ? m[1].trim().toLowerCase() : 'medium';
+        const word = t
+          .replace(/\([^)]*\)/g, '')
+          .replace(/[^a-z\s-]/gi, '')
+          .trim()
+          .toLowerCase();
+        return VALID_MAGNITUDES.has(word) ? null : { word, magnitude };
+      })
+      .filter(Boolean);
+
+    if (descriptors.length === 0) return;
     const key = `${subject}→${target}`;
 
     const h = loadRelationshipHistory(characterName);
@@ -1280,7 +1294,7 @@ export function bindSettingsUI(ctrl) {
     const editingKey = $('#sm_relationship_add_form').data('editing');
     if (editingKey && editingKey !== key) delete h[editingKey];
 
-    h[key] = { descriptors, magnitude, updatedAt: Date.now() };
+    h[key] = { descriptors, updatedAt: Date.now() };
     saveRelationshipHistory(characterName, h);
     saveSettingsDebounced();
     injectRelationshipHistory(characterName);
