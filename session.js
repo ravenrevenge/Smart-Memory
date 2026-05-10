@@ -401,7 +401,6 @@ export async function extractSessionMemories(recentMessages, abortCheck = null) 
     // Profile B and opted-in Profile A: generate LLM-suggested triggers for
     // newly added session memories. Same path as long-term, runs sequentially.
     const existingKeys = new Set(existing.map((m) => `${m.type}|${m.content}`));
-    const settings = extension_settings[MODULE_NAME];
     if (getHardwareProfile() === 'b' || settings.longterm_triggers_enabled) {
       for (const mem of finalActive) {
         if (existingKeys.has(`${mem.type}|${mem.content}`)) continue;
