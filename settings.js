@@ -1008,7 +1008,7 @@ export function bindSettingsUI(ctrl) {
     if (isCatchUpRunning()) return;
     if (ctrl.compactionRunning) return;
     ctrl.compactionRunning = true;
-    setStatusMessage('Generating summary...');
+    setStatusMessage('Extracting short-term memories...');
     $(this).prop('disabled', true);
     try {
       const summary = await runCompaction();
@@ -1998,7 +1998,7 @@ export function bindSettingsUI(ctrl) {
         // Short-term compaction runs once at the end - it uses the real token
         // count to decide what to include, so chunking doesn't apply.
         if (settings.compaction_enabled) {
-          setStatusMessage('Generating summary...');
+          setStatusMessage('Extracting short-term memories...');
           await runCompaction({ includeLastMessage: true })
             .then((summary) => {
               if (summary) {

@@ -1825,7 +1825,7 @@ jQuery(async function () {
       callback: async () => {
         if (compactionRunning) return 'Compaction already running.';
         compactionRunning = true;
-        setStatusMessage('Generating summary...');
+        setStatusMessage('Extracting short-term memories...');
         try {
           const summary = await runCompaction();
           if (summary) {
