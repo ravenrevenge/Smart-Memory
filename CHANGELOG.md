@@ -180,6 +180,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the toggle, content-word overlap handles the baseline. Trigger generation applies
   to both long-term memories and session memories.
 
+## [1.6.11] - 2026-05-10
+
+### Added
+
+- **OpenAI-compatible embedding source**: semantic deduplication now works with
+  any server that implements the `/v1/embeddings` endpoint - not just Ollama. A
+  new "Embedding source" selector in the deduplication settings lets you choose
+  between Ollama (existing behaviour) and OpenAI Compatible (sends requests to
+  `/v1/embeddings` with the standard request/response format). Works with hosted
+  services, vLLM, llama.cpp, KoboldCpp, and any other OpenAI-compatible inference
+  server that exposes embeddings.
+
 ## [1.6.10] - 2026-05-06
 
 ### Fixed
