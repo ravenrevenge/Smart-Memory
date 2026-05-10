@@ -635,20 +635,8 @@ export async function extractAndStoreMemories(characterName, recentMessages, sta
         const deltas = parseRelationshipDeltaResponse(relResponse);
 
         // Only store pairs where the character is one of the parties.
-        // Pairs between two other people belong in their own records.
-        // Bidirectional substring match handles cases where the card name
-        // is a full name ("Asher Somel") but the RP uses a short form ("Asher").
-        const charLower = characterName.toLowerCase();
-        const nameMatches = (name) => {
-          const n = name.toLowerCase();
-          return n.includes(charLower) || charLower.includes(n);
-        };
-        const relevant = deltas.filter(
-          ({ subject, target }) => nameMatches(subject) || nameMatches(target),
-        );
-
-        if (relevant.length > 0) {
-          for (const { subject, target, updates, removals } of relevant) {
+        if (deltas.length > 0) {
+          for (const { subject, target, updates, removals } of deltas) {
             const key = `${subject}→${target}`;
             const existing = relHistory[key] ?? { descriptors: [], updatedAt: Date.now() };
 
@@ -680,7 +668,7 @@ export async function extractAndStoreMemories(characterName, recentMessages, sta
             };
           }
           saveRelationshipHistory(characterName, relHistory);
-          smLog(`[SmartMemory] Relationship deltas applied: ${relevant.length} pair(s)`);
+          smLog(`[SmartMemory] Relationship deltas applied: ${deltas.length} pair(s)`);
         }
       } catch (err) {
         smLog(`[SmartMemory] Relationship extraction failed: ${err.message}`);
