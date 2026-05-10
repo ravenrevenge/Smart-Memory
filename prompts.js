@@ -779,7 +779,8 @@ export function buildRelationshipDeltaPrompt(sceneText, currentState, characterC
     `- high = deep or persistent; medium = notable; low = mild or fleeting\n` +
     `- Only output pairs where at least one party appears in the scene\n` +
     `- Include new pairs introduced mid-scene if the prose establishes a clear relationship\n` +
-    `- Do not include pets, animals, or unnamed background characters\n` +
+    `- Include named animals and non-human characters if they have a meaningful relationship with someone\n` +
+    `- Do not include unnamed extras or background crowd members\n` +
     `- Output NONE if no relevant pairs appear in the scene\n\n` +
     `Format: Subject -> Target: descriptor(magnitude), descriptor(magnitude)\n\n` +
     cardSection +
