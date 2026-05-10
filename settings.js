@@ -1856,7 +1856,7 @@ export function bindSettingsUI(ctrl) {
             setStatusMessage(
               `Catching up... (${i}/${total} messages - extracting long-term for ${name})`,
             );
-            await extractAndStoreMemories(name, nameChunk).catch((err) => {
+            await extractAndStoreMemories(name, nameChunk, setStatusMessage).catch((err) => {
               console.error('[SmartMemory] Catch-up long-term extraction error (chunk):', err);
             });
             // Consolidate after each chunk so near-duplicates are collapsed before
