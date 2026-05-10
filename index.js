@@ -593,7 +593,7 @@ async function onCharacterMessageRendered() {
       // Only reset the counter once we know extraction will actually proceed.
       messagesSinceLastExtraction = 0;
 
-      setStatusMessage('Extracting memories...');
+      setStatusMessage(`Extracting memories for ${characterName}...`);
 
       // Run extraction tiers sequentially rather than in parallel.
       // Parallel model calls overwhelm local hardware (RTX 2080 / 8GB VRAM)
@@ -690,7 +690,7 @@ async function onCharacterMessageRendered() {
             });
             consolidationRunning = false;
             if (removed > 0) {
-              setStatusMessage(`Consolidated ${removed} redundant memories.`);
+              setStatusMessage(`Consolidated ${removed} redundant memories for ${characterName}.`);
               toastr.info(
                 `Merged ${removed} redundant ${removed === 1 ? 'memory' : 'memories'}.`,
                 'Smart Memory',
@@ -766,7 +766,9 @@ async function onCharacterMessageRendered() {
         updateEntityPanel(characterName);
         maybeInjectUnified();
         updateTokenDisplay();
-        setStatusMessage(total > 0 ? `${total} item${total === 1 ? '' : 's'} stored.` : '');
+        setStatusMessage(
+          total > 0 ? `${total} item${total === 1 ? '' : 's'} stored for ${characterName}.` : '',
+        );
 
         // Persist the cutoff so the next extraction pass knows where this one ended.
         const lastMsg = context.chat[context.chat.length - 1];
@@ -1439,7 +1441,9 @@ async function onGroupWrapperFinished({ type } = {}) {
                 });
                 consolidationRunning = false;
                 if (removed > 0) {
-                  setStatusMessage(`Consolidated ${removed} redundant memories.`);
+                  setStatusMessage(
+                    `Consolidated ${removed} redundant memories for ${characterName}.`,
+                  );
                   toastr.info(
                     `Merged ${removed} redundant ${removed === 1 ? 'memory' : 'memories'}.`,
                     'Smart Memory',
@@ -1860,7 +1864,7 @@ jQuery(async function () {
         const characterName = getCurrentCharacterName();
         if (!characterName) return 'No character active.';
         extractionRunning = true;
-        setStatusMessage('Extracting memories...');
+        setStatusMessage(`Extracting memories for ${characterName}...`);
         try {
           const context = getContext();
           const recentLongTerm = getStableExtractionWindowWithFallback(context.chat, 20);

@@ -1377,18 +1377,18 @@ export function bindSettingsUI(ctrl) {
     if (!characterName) return;
     ctrl.extractionRunning = true;
     $(this).prop('disabled', true);
-    setStatusMessage('Extracting memories...');
+    setStatusMessage(`Extracting memories for ${characterName}...`);
     try {
       const context = getContext();
       const recentMessages = ctrl.getStableExtractionWindowWithFallback(context.chat, 20);
-      const count = await extractAndStoreMemories(characterName, recentMessages);
+      const count = await extractAndStoreMemories(characterName, recentMessages, setStatusMessage);
       saveSettingsDebounced();
       updateLongTermUI(characterName);
       updateRelationshipHistoryUI(characterName);
       setStatusMessage(
         count > 0
-          ? `${count} new memor${count === 1 ? 'y' : 'ies'} saved.`
-          : 'No new memories found.',
+          ? `${count} new memor${count === 1 ? 'y' : 'ies'} saved for ${characterName}.`
+          : `No new memories found for ${characterName}.`,
       );
     } catch (err) {
       showError('Memory extraction', err);
