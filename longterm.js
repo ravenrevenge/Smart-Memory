@@ -275,7 +275,25 @@ export function clearCharacterMemories(characterName) {
  */
 export function loadRelationshipHistory(characterName) {
   if (!characterName) return {};
-  return extension_settings[MODULE_NAME].characters?.[characterName]?.relationship_history ?? {};
+  const raw =
+    extension_settings[MODULE_NAME].characters?.[characterName]?.relationship_history ?? {};
+  // Normalize entries still in the old flat format { descriptors: string[], magnitude: string }
+  // to the current per-descriptor format { descriptors: Array<{word, magnitude}> }.
+  // This is a read-time safety net in case the schema migration did not run yet.
+  const normalized = {};
+  for (const [key, state] of Object.entries(raw)) {
+    const descs = state.descriptors ?? [];
+    if (descs.length > 0 && typeof descs[0] === 'string') {
+      const fallbackMag = state.magnitude ?? 'medium';
+      normalized[key] = {
+        descriptors: descs.map((w) => ({ word: w, magnitude: fallbackMag })),
+        updatedAt: state.updatedAt ?? Date.now(),
+      };
+    } else {
+      normalized[key] = state;
+    }
+  }
+  return normalized;
 }
 
 /**
