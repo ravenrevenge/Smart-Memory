@@ -629,7 +629,7 @@ export async function extractAndStoreMemories(characterName, recentMessages, sta
       const cardExcerpt = cardChar?.description ?? '';
 
       try {
-        if (statusFn) statusFn('Extracting relationship history...');
+        if (statusFn) statusFn(`Extracting relationship history for ${characterName}...`);
         const relPrompt = buildRelationshipDeltaPrompt(chatHistory, stateLines, cardExcerpt);
         const relResponse = await generateMemoryExtract(relPrompt, { responseLength: 300 });
         const deltas = parseRelationshipDeltaResponse(relResponse);
