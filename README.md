@@ -585,13 +585,35 @@ When memories would exceed the token budget, Smart Memory scores each entry acro
 
 Supersession detection runs in two passes. First, a quick pattern check looks for state-change language in the new memory - phrases like "no longer", "became", "healed", "left the", "was captured", and many others cover the most common ways a fact changes in natural language. Second, when two memories score as clearly being about the same topic but no pattern phrase was found (because the phrasing was unusual - "confiscated", "hijacked", etc.), Smart Memory asks the AI directly: does this new memory update or replace the old one, or are both still true at the same time? One short question, one word answer. Extra model calls only happen when a suspicious pair is found - quiet passes cost nothing extra.
 
+### Macro Injection
+
+Each memory tier exposes a macro token you can place anywhere in a character card field or instruct template. When Smart Memory finds its token in a card, it injects the tier's content at that position instead of using its default injection slot - so you control exactly where each tier appears relative to your own scaffolding.
+
+| Macro                           | Tier                      |
+| ------------------------------- | ------------------------- |
+| `{{smartmemory-shortterm}}`     | Short-term summary        |
+| `{{smartmemory-longterm}}`      | Long-term memories        |
+| `{{smartmemory-session}}`       | Session memories          |
+| `{{smartmemory-scenes}}`        | Scene history             |
+| `{{smartmemory-arcs}}`          | Story arcs                |
+| `{{smartmemory-relationships}}` | Relationship history      |
+| `{{smartmemory-canon}}`         | Canon                     |
+| `{{smartmemory-profiles}}`      | Profiles                  |
+| `{{smartmemory-unified}}`       | Unified block (see below) |
+
+Place any token in the **Main Prompt**, **Description**, **Personality summary**, **Scenario**, or **Examples of dialogue** fields of a character card. Smart Memory detects the token automatically and activates macro mode for that tier - no settings change needed.
+
+If you place macros in an **instruct template** rather than a character card, enable **Force macro injection mode** in Configuration (advanced mode). Instruct templates cannot be scanned for auto-detection, so the override is required.
+
+The `{{smartmemory-unified}}` macro is only active when **Unified injection** is also on. It lets you control where the merged block lands in the same way individual tier macros control per-tier placement. Individual tier macros are inactive while unified injection is on - unified owns all tier content.
+
 ### Developer Settings
 
-| Setting                          | Default | Description                                                                                                                                                                                       |
-| -------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Verbose logging                  | Off     | Print detailed progress to the browser console for extraction, consolidation, and scene detection. Errors are always logged regardless                                                            |
-| Unified injection (experimental) | Off     | Merges all active memory tiers into a single context block ordered from most stable (canon, profiles, long-term) to most immediate (session, arcs). The token bar still shows per-tier breakdowns |
-| Force macro injection mode       | Off     | Forces macro injection for all tiers. Use when macros are in instruct templates (cannot be auto-detected from card fields). Leave off for card macros - auto-detection handles them. Incompatible |
+| Setting                          | Default | Description                                                                                                                                                                                                      |
+| -------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Verbose logging                  | Off     | Print detailed progress to the browser console for extraction, consolidation, and scene detection. Errors are always logged regardless                                                                           |
+| Unified injection (experimental) | Off     | Merges all active memory tiers into a single context block ordered from most stable (canon, profiles, long-term) to most immediate (session, arcs). The token bar still shows per-tier breakdowns                |
+| Force macro injection mode       | Off     | Forces macro injection for all tiers. Use when macros are in instruct templates (cannot be auto-detected from card fields). Leave off for card macros - auto-detection handles them. Incompatible with unified injection |
 
 ---
 
