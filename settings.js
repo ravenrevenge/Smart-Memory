@@ -2496,7 +2496,11 @@ export function bindSettingsUI(ctrl) {
   function applyInjectionOverrideUI() {
     const cur = extension_settings[MODULE_NAME];
     const hide = (cur.unified_injection ?? false) || (cur.macros_enabled ?? false);
-    $('[name$="_position"], #sm_longterm_triggered_depth').closest('.sm-block').toggle(!hide);
+    // Exclude sm_unified_position - it belongs to the unified block's own settings,
+    // not to any per-tier slot, and must stay visible when unified injection is on.
+    $('[name$="_position"]:not([name="sm_unified_position"]), #sm_longterm_triggered_depth')
+      .closest('.sm-block')
+      .toggle(!hide);
   }
 
   $('#sm_unified_injection')
