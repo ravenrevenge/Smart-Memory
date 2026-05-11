@@ -33,11 +33,13 @@
  * MACRO_NAMES              - canonical macro name strings for all 9 macros
  * setMacroContent          - stores tier content in the cache (called by inject fns)
  * isMacroActive            - true when the macro should handle placement for a tier
- * registerSmartMemoryMacros - registers all macros with the ST macro system at init
+ * registerSmartMemoryMacros - registers all 9 macros with the ST macro system at init
  */
 
 import { getContext, extension_settings } from '../../../extensions.js';
 import { macros as stMacros } from '../../../../scripts/macros/macro-system.js';
+import { MacrosParser } from '../../../../scripts/macros.js';
+import { power_user } from '../../../../scripts/power-user.js';
 import { MODULE_NAME } from './constants.js';
 
 /**
@@ -111,17 +113,29 @@ export function isMacroActive(macroName) {
 }
 
 /**
- * Registers all 8 Smart Memory macros with the SillyTavern macro system.
+ * Registers all 9 Smart Memory macros with the SillyTavern macro system.
  * Called once at extension load time. The cache starts empty so each macro
  * returns an empty string until the first inject call populates it.
+ *
+ * ST's new macro engine (experimental_macro_engine flag) uses MacroRegistry.
+ * The legacy engine uses MacrosParser. We register with whichever is active,
+ * mirroring the pattern used by ST's own built-in modules.
  */
 export function registerSmartMemoryMacros() {
   for (const [tierKey, macroName] of Object.entries(MACRO_NAMES)) {
-    stMacros.register(macroName, {
-      category: stMacros.category.MISC,
-      description: `Smart Memory: ${tierKey} tier content`,
-      returns: 'Formatted memory tier content, empty string if tier is disabled or has no data',
-      handler: () => contentCache.get(macroName) ?? '',
-    });
+    if (power_user?.experimental_macro_engine) {
+      stMacros.register(macroName, {
+        category: stMacros.category.MISC,
+        description: `Smart Memory: ${tierKey} tier content`,
+        returns: 'Formatted memory tier content, empty string if tier is disabled or has no data',
+        handler: () => contentCache.get(macroName) ?? '',
+      });
+    } else {
+      MacrosParser.registerMacro(
+        macroName,
+        () => contentCache.get(macroName) ?? '',
+        `Smart Memory: ${tierKey} tier content`,
+      );
+    }
   }
 }
