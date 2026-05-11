@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Thinking model tokens polluting extraction output**: models that emit
+  `<think>...</think>` reasoning blocks (Qwen3, DeepSeek R1, and others with
+  thinking enabled) had their reasoning content passed directly to the extraction
+  parsers, flooding memory tiers with raw chain-of-thought rather than extracted
+  content. All model responses are now stripped of thinking blocks before parsing.
+  Non-thinking models are unaffected.
+
 - **Duplicate descriptors after hedge normalization**: when the model output both
   a hedged and unhedged form of the same descriptor in the same extraction pass
   (e.g. `slightly nervous(medium)` and `nervous(medium)`), both survived into

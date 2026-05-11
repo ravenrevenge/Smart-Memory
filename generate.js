@@ -27,7 +27,8 @@
  * chat uses a larger roleplay-tuned model.
  *
  * memory_sources                - enum of supported sources: 'main' | 'webllm' | 'ollama' | 'openai_compatible'
- * generateMemoryExtract         - for extraction tasks (self-contained prompt, no chat context needed)
+ * generateMemoryExtract         - for extraction tasks (self-contained prompt, no chat context needed);
+ *                                 automatically strips <think>...</think> blocks from all responses
  * generateMemorySummarize       - for summarization tasks (needs the full chat context)
  * fetchOllamaModels             - returns the list of models installed in a local Ollama instance
  * abortCurrentMemoryGeneration  - cancels any in-flight Ollama or OpenAI-compat fetch immediately
@@ -46,6 +47,21 @@ import { MODULE_NAME } from './constants.js';
  * abortCurrentMemoryGeneration() when a swipe is requested.
  */
 let memoryAbortController = null;
+
+// Matches <think>...</think> blocks produced by reasoning models (Qwen3,
+// DeepSeek R1, and others). The block and all its content is stripped before
+// parsing so thinking tokens never reach the extraction parsers.
+const THINK_BLOCK_RE = /<think>[\s\S]*?<\/think>/gi;
+
+/**
+ * Strips thinking-model reasoning blocks from a raw model response.
+ * Safe to call on any response - returns the string unchanged if no blocks are present.
+ * @param {string} text
+ * @returns {string}
+ */
+function stripThinkingBlocks(text) {
+  return text.replace(THINK_BLOCK_RE, '').trim();
+}
 
 /**
  * Cancels any in-flight Ollama or OpenAI-compat memory generation immediately.
@@ -207,34 +223,34 @@ async function generateOpenAICompat(prompt, priorMessages = [], responseLength =
  */
 export async function generateMemoryExtract(prompt, { responseLength = 600 } = {}) {
   const source = getSource();
+  let raw;
 
   if (source === memory_sources.ollama) {
-    return generateOllama(prompt, [], responseLength);
-  }
-
-  if (source === memory_sources.openai_compatible) {
-    return generateOpenAICompat(prompt, [], responseLength);
-  }
-
-  if (source === memory_sources.webllm) {
+    raw = await generateOllama(prompt, [], responseLength);
+  } else if (source === memory_sources.openai_compatible) {
+    raw = await generateOpenAICompat(prompt, [], responseLength);
+  } else if (source === memory_sources.webllm) {
     if (!isWebLlmSupported()) {
       console.warn(
         `[${MODULE_NAME}] WebLLM source selected but WebLLM is not available, falling back to main`,
       );
+      raw = await generateRaw({ prompt, instruct: false, quietToLoud: false, responseLength });
     } else {
       const messages = [{ role: 'user', content: prompt }];
       const params = responseLength > 0 ? { max_tokens: responseLength } : {};
-      return await generateWebLlmChatPrompt(messages, params);
+      raw = await generateWebLlmChatPrompt(messages, params);
     }
+  } else {
+    // Default: main API. instruct:false prevents the instruct template from
+    // wrapping the extraction prompt, which is important for our tagged-line
+    // output format ([type:score:expiration] lines). This is a supported
+    // generateRaw parameter in SillyTavern. The parsers are also resilient -
+    // they only match valid tagged lines and ignore everything else - so even
+    // if this were silently ignored the output would still parse correctly.
+    raw = await generateRaw({ prompt, instruct: false, quietToLoud: false, responseLength });
   }
 
-  // Default: main API. instruct:false prevents the instruct template from
-  // wrapping the extraction prompt, which is important for our tagged-line
-  // output format ([type:score:expiration] lines). This is a supported
-  // generateRaw parameter in SillyTavern. The parsers are also resilient -
-  // they only match valid tagged lines and ignore everything else - so even
-  // if this were silently ignored the output would still parse correctly.
-  return await generateRaw({ prompt, instruct: false, quietToLoud: false, responseLength });
+  return stripThinkingBlocks(raw ?? '');
 }
 
 /**
