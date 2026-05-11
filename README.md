@@ -186,6 +186,8 @@ These models have been tested against Smart Memory's extraction prompts. They ar
 
 [**`gemma3:4b`**](https://ollama.com/library/gemma3) (3.3 GB) - lightest option, but the quality gap is meaningful. On shorter exchanges it can misread character traits, occasionally produces duplicate entries in a single pass, and is more prone to extracting from prompt examples rather than conversation content on complex prompts. Use it only if 4 GB is a hard limit and you accept that memory quality will be noticeably lower than the models above.
 
+**Honorable mention: [`huihui_ai/gemma4-abliterated:e4b-it`](https://ollama.com/huihui_ai/gemma4-abliterated) (various sizes)** - extracts fewer items per pass than Qwen but what it does extract tends to be more precise. It identifies genuinely unresolved narrative threads rather than listing developing emotions as arcs, and its character facts are sharply drawn. It will not pass the built-in model test's quantity thresholds, but the output quality is real. Worth trying if you prefer accuracy over coverage, or if you find Qwen over-extracts for your style of roleplay. Note that this is a reasoning model - see [Reasoning models](#reasoning-models) below for setup notes.
+
 Smart Memory's prompts are longer than typical chat prompts - a model that works fine for roleplay may still struggle with extraction if the combined prompt length exceeds its effective context window. If you get empty or garbled extraction output with a different model, context overflow is the most likely cause. Use the **Test Extraction Model** button to check any model before committing to it.
 
 ### Reasoning models
