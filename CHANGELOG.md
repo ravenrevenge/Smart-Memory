@@ -119,18 +119,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Macro injection**: all 8 memory tiers now expose SillyTavern macros that can
-  be placed anywhere in a character card or instruct template to control exactly
-  where memory content appears in the prompt, rather than relying on Smart Memory's
-  automatic injection depth and position settings. The macros are:
-  `{{smartmemory-shortterm}}`, `{{smartmemory-longterm}}`, `{{smartmemory-session}}`,
-  `{{smartmemory-scenes}}`, `{{smartmemory-arcs}}`, `{{smartmemory-relationships}}`,
-  `{{smartmemory-canon}}`, `{{smartmemory-profiles}}`. Auto-detection activates macro
-  mode per tier when a token is found in the character card system prompt, description,
-  personality, scenario, or example messages. A new "Force macro injection mode"
-  toggle in Developer Settings activates all tiers at once for use with instruct
-  templates (which cannot be auto-detected from card fields). Macro mode and unified
-  injection are mutually exclusive - unified takes precedence when both are enabled.
+- **Macro injection**: all 9 Smart Memory macros can be placed anywhere in a
+  character card or instruct template to control exactly where memory content appears
+  in the prompt, rather than relying on automatic injection depth and position settings.
+  The 8 per-tier macros are: `{{smartmemory-shortterm}}`, `{{smartmemory-longterm}}`,
+  `{{smartmemory-session}}`, `{{smartmemory-scenes}}`, `{{smartmemory-arcs}}`,
+  `{{smartmemory-relationships}}`, `{{smartmemory-canon}}`, `{{smartmemory-profiles}}`.
+  A ninth macro, `{{smartmemory-unified}}`, works alongside unified injection mode and
+  injects the full merged block wherever the token is placed - letting users control
+  the placement of the unified block the same way individual macros control per-tier
+  placement. Per-tier macros are inactive when unified injection is on (unified owns
+  those tiers); the unified macro is inactive when unified injection is off. Auto-detection
+  activates macro mode per tier when a token is found in the character card system prompt,
+  description, personality, scenario, or example messages. A "Force macro injection mode"
+  toggle in Configuration (advanced) activates all applicable macros at once for use with
+  instruct templates that cannot be auto-detected from card fields.
 
 - **Source-message provenance**: long-term and session memories now record which
   message range they were extracted from. A **jump-to-source** button appears on

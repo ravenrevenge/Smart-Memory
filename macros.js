@@ -25,7 +25,12 @@
  * Inject functions update the cache on every call so macros always return
  * fresh content without requiring a separate generation pass.
  *
- * MACRO_NAMES              - canonical macro name strings for all 8 tiers
+ * The unified macro (smartmemory-unified) is a special case: it is only active
+ * when unified injection is also on, and its content is the merged block produced
+ * by injectUnified rather than a single tier. Individual tier macros are inactive
+ * when unified injection is on - unified owns those tiers.
+ *
+ * MACRO_NAMES              - canonical macro name strings for all 9 macros
  * setMacroContent          - stores tier content in the cache (called by inject fns)
  * isMacroActive            - true when the macro should handle placement for a tier
  * registerSmartMemoryMacros - registers all macros with the ST macro system at init
@@ -36,7 +41,7 @@ import { macros as stMacros } from '../../../../scripts/macros/macro-system.js';
 import { MODULE_NAME } from './constants.js';
 
 /**
- * Canonical macro names for all 8 injectable memory tiers.
+ * Canonical macro names for all 9 macros (8 individual tiers + unified block).
  * These strings are what users place in character cards or instruct templates.
  */
 export const MACRO_NAMES = {
@@ -48,6 +53,7 @@ export const MACRO_NAMES = {
   relationships: 'smartmemory-relationships',
   canon: 'smartmemory-canon',
   profiles: 'smartmemory-profiles',
+  unified: 'smartmemory-unified',
 };
 
 // Content cache keyed by macro name. Updated by inject functions so the macro
@@ -72,23 +78,29 @@ const CARD_FIELDS = ['system_prompt', 'description', 'personality', 'scenario', 
 /**
  * Returns true when the named macro should handle prompt placement for its tier.
  *
- * Active conditions (all must hold):
- *  - unified_injection is off (the two modes are incompatible - unified builds a
- *    single block from all tiers and has no place to insert individual macros)
- *  - Either macros_enabled is true (manual override, e.g. for instruct templates)
- *    OR the macro token appears in one of the current character card's fields
- *    (auto-detection for the common case of users editing their card)
+ * Individual tier macros (shortterm, longterm, etc.) are inactive when unified
+ * injection is on - unified owns all tier content and merges it into one block,
+ * so individual macros would have nothing to inject.
+ *
+ * The unified macro is the inverse: it is only meaningful when unified injection
+ * is on (otherwise it has no content to return). It lets users control where the
+ * merged block appears, just like individual tier macros control per-tier placement.
+ *
+ * For both kinds, activation requires either macros_enabled (manual override for
+ * instruct templates) or the macro token present in a character card field.
  *
  * @param {string} macroName - One of the MACRO_NAMES values.
  * @returns {boolean}
  */
 export function isMacroActive(macroName) {
   const settings = extension_settings[MODULE_NAME];
-  // Macro injection and unified injection build the prompt differently and
-  // cannot coexist. Unified takes precedence since it is the more intentional mode.
-  if (settings?.unified_injection) return false;
-  // Manual override: user set macros_enabled to force macro mode for all tiers.
-  // Necessary for instruct templates, which we cannot scan from the card fields.
+  const isUnifiedMacro = macroName === MACRO_NAMES.unified;
+  // The unified macro only makes sense when unified injection is on.
+  if (isUnifiedMacro && !settings?.unified_injection) return false;
+  // Individual tier macros are incompatible with unified injection - unified owns
+  // those tiers. The unified macro itself is handled by the check above.
+  if (!isUnifiedMacro && settings?.unified_injection) return false;
+  // Manual override: force macro mode for all applicable macros.
   if (settings?.macros_enabled) return true;
   // Auto-detection: look for the {{macro-name}} token in character card fields.
   const token = `{{${macroName}}}`;
