@@ -2504,9 +2504,10 @@ export function bindSettingsUI(ctrl) {
     $('[name$="_position"]:not([name="sm_unified_position"]), #sm_longterm_triggered_depth')
       .closest('.sm-block')
       .toggle(!hide);
-    // Unified sub-settings are only relevant when unified injection is on and
-    // macro mode is off (if macro mode is on, the macro controls placement).
-    $('#sm_unified_settings').toggle(unified && !macros);
+    // Unified sub-settings are only relevant when unified injection is on,
+    // macro mode is off, and advanced mode is active.
+    const advanced = (cur.settings_mode ?? 'simple') === 'advanced';
+    $('#sm_unified_settings').toggle(unified && !macros && advanced);
   }
 
   $('#sm_unified_injection')
