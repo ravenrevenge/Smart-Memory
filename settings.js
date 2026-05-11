@@ -551,6 +551,7 @@ export function bindSettingsUI(ctrl) {
       extension_settings[MODULE_NAME].settings_mode = mode;
       saveSettingsDebounced();
       applySettingsMode(mode);
+      applyInjectionOverrideUI();
     });
 
   // ---- Simplified total budget slider ---------------------------------
