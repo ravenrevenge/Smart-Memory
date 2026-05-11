@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Duplicate descriptors after hedge normalization**: when the model output both
+  a hedged and unhedged form of the same descriptor in the same extraction pass
+  (e.g. `slightly nervous(medium)` and `nervous(medium)`), both survived into
+  storage after normalization. A post-normalization dedup pass now runs per pair
+  and keeps only the highest-magnitude entry for each root word.
+
+- **`crypto.randomUUID` unavailable on HTTP**: memory ID generation failed with
+  `TypeError: crypto.randomUUID is not a function` when SillyTavern was accessed
+  over plain HTTP from a remote device. A manual UUID v4 fallback is now used
+  when `crypto.randomUUID` is not available.
+
 - **Relationship history magnitude parsing**: the extraction parser only
   recognized a `magnitude=X` keyword syntax but the model outputs plain
   magnitude words (`low`, `medium`, `high`) inline with the descriptor; a

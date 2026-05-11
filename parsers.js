@@ -455,6 +455,8 @@ const RELATIONSHIP_LINE_RE = /^([^→-]+?)\s*(?:->|→)\s*([^:]+?)\s*:\s*(.+)$/;
 // Matches the inline magnitude suffix: word(low|medium|high)
 const INLINE_MAGNITUDE_RE = /\((\s*low|medium|high\s*)\)/i;
 const MAGNITUDE_KEYWORDS = new Set(['low', 'medium', 'high']);
+// Numeric order for magnitude comparison - used to resolve duplicate root words.
+const MAGNITUDE_ORDER = { low: 0, medium: 1, high: 2 };
 // Transitional phrases the model sometimes uses to describe change - strip them.
 const TRANSITION_RE =
   /\b(?:then\s+(?:more\s+)?|increasingly\s+|still\s+|even\s+more\s+|becoming\s+(?:more\s+)?)/gi;
@@ -545,8 +547,20 @@ export function parseRelationshipDeltaResponse(response) {
       }
     }
 
-    if (subject && target && (updates.length > 0 || removals.length > 0)) {
-      results.push({ subject, target, updates, removals });
+    // Deduplicate updates by root word: hedge normalization can produce the same
+    // word twice with different magnitudes (e.g. "slightly nervous(medium)" and
+    // "nervous(medium)" both survive the token loop). Keep only the highest magnitude.
+    const deduped = new Map();
+    for (const { word, magnitude } of updates) {
+      const existing = deduped.get(word);
+      if (!existing || MAGNITUDE_ORDER[magnitude] > MAGNITUDE_ORDER[existing.magnitude]) {
+        deduped.set(word, { word, magnitude });
+      }
+    }
+    const dedupedUpdates = [...deduped.values()];
+
+    if (subject && target && (dedupedUpdates.length > 0 || removals.length > 0)) {
+      results.push({ subject, target, updates: dedupedUpdates, removals });
     }
   }
   return results;
