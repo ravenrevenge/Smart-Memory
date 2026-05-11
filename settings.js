@@ -2499,14 +2499,15 @@ export function bindSettingsUI(ctrl) {
     const unified = cur.unified_injection ?? false;
     const macros = cur.macros_enabled ?? false;
     const hide = unified || macros;
-    // Exclude sm_unified_position - it belongs to the unified block's own settings,
-    // not to any per-tier slot, and must stay visible when unified injection is on.
+    const advanced = (cur.settings_mode ?? 'simple') === 'advanced';
+    // Per-tier position/depth/role blocks are advanced-only and hidden by override modes.
+    // Both conditions must be met to show them: advanced mode on and no override active.
+    // Exclude sm_unified_position - it belongs to the unified block's own settings.
     $('[name$="_position"]:not([name="sm_unified_position"]), #sm_longterm_triggered_depth')
       .closest('.sm-block')
-      .toggle(!hide);
+      .toggle(!hide && advanced);
     // Unified sub-settings are only relevant when unified injection is on,
     // macro mode is off, and advanced mode is active.
-    const advanced = (cur.settings_mode ?? 'simple') === 'advanced';
     $('#sm_unified_settings').toggle(unified && !macros && advanced);
   }
 
