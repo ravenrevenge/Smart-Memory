@@ -376,10 +376,13 @@ const TIER_DEFS = [
     // Epistemic has its own enable gate combining epistemic_enabled and profile.
     enabledKey: null,
     hint:
-      'Should extract at least one entry per type using the village healer scene: ' +
-      '[knows] for Ryn and Mira, [suspects] for Sera, [believes] for Ryn, ' +
-      '[unaware] for Ryn about the mill negotiation, and [hiding] for Dael from Ryn. ' +
-      'A capable model finds all six and does not confuse what is known with what is hidden.',
+      'Ideally should extract entries covering most or all five tag types from the village healer scene: ' +
+      '[knows] facts held by Ryn, Mira, Sera, and Dael; [suspects] for Sera regarding the papers; ' +
+      '[believes] for a character holding an incorrect assumption; [unaware] for characters who do not ' +
+      'know something relevant; and [hiding] for Dael concealing the purpose of his saddlebag from Ryn. ' +
+      'Fewer entries is acceptable as long as the tags are used correctly. ' +
+      'A model that confuses [knows] with [hiding], or misses all entries of a type entirely, may not ' +
+      'be suitable for Perspectives & Secrets.',
     responseLength: 400,
     // Uses a different test scenario than the main tiers to exercise all five tags cleanly.
     buildPrompt: () => {
