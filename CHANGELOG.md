@@ -267,6 +267,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   placement-controlled injection. The extraction model test now includes a separate
   Mira/Sera/Ryn/Dael scene designed to exercise all five epistemic tags.
 
+- **State Ledger**: tracks the current observable physical and operational state of
+  named entities (characters, objects, places, factions) as a compact snapshot.
+  Extracted per session from the same message window as other extraction tiers;
+  injected as a tightly formatted block near the current action so the AI stays
+  grounded in what is visible right now rather than relying on scattered memories.
+
+  Supported entity types and their fields:
+  - character: location, injuries, outfit/disguise, mood, active goal, carried items
+  - object: owner, location, condition, status
+  - place: occupants, hazards, political control, damage, accessibility
+  - faction: leadership, objective, alliances, hostility level
+
+  State cards are chat-scoped - current state does not carry over when a new chat
+  begins. Each state card is stored under a `name|type` key in `chatMetadata` and
+  kept in sync with the entity registry: type changes migrate the card to the new
+  key; merges with conflicting cards open a modal to pick which card survives; delete
+  warns before discarding a populated card. Cards can also be created and edited
+  manually from the entity panel below each entity row.
+
+  Extraction runs sequentially after other tiers to stay within VRAM limits. The
+  parser silently drops placeholder values (`unknown`, `none`, `not mentioned`, etc.)
+  that weaker models emit instead of omitting unknown fields. On Profile A the feature
+  is off by default; a per-section override enables it when the local model is
+  reasoning-capable. The token budget (200 tokens by default) is funded by a small
+  reduction to the arc and canon ratios (schema v9 adds `state_ledger: {}` to all
+  chat metadata). The `{{smartmemory-stateledger}}` macro is available for
+  placement-controlled injection. The extraction model test now includes a dungeon
+  scene designed to exercise current-vs-past state, sparse output, and multiple
+  entity types.
+
 ## [1.6.11] - 2026-05-10
 
 ### Added

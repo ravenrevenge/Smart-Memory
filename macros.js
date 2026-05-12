@@ -30,7 +30,7 @@
  * by injectUnified rather than a single tier. Individual tier macros are inactive
  * when unified injection is on - unified owns those tiers.
  *
- * MACRO_NAMES              - canonical macro name strings for all 10 macros
+ * MACRO_NAMES              - canonical macro name strings for all 11 macros
  * setMacroContent          - stores tier content in the cache (called by inject fns)
  * isMacroActive            - true when the macro should handle placement for a tier
  * registerSmartMemoryMacros - registers all 10 macros with the ST macro system at init
@@ -43,7 +43,7 @@ import { power_user } from '../../../../scripts/power-user.js';
 import { MODULE_NAME } from './constants.js';
 
 /**
- * Canonical macro names for all 10 macros (9 individual tiers + unified block).
+ * Canonical macro names for all 11 macros (10 individual tiers + unified block).
  * These strings are what users place in character cards or instruct templates.
  */
 export const MACRO_NAMES = {
@@ -56,6 +56,7 @@ export const MACRO_NAMES = {
   canon: 'smartmemory-canon',
   profiles: 'smartmemory-profiles',
   epistemic: 'smartmemory-epistemic',
+  state_ledger: 'smartmemory-stateledger',
   unified: 'smartmemory-unified',
 };
 
@@ -114,7 +115,7 @@ export function isMacroActive(macroName) {
 }
 
 /**
- * Registers all 9 Smart Memory macros with the SillyTavern macro system.
+ * Registers all 11 Smart Memory macros with the SillyTavern macro system.
  * Called once at extension load time. The cache starts empty so each macro
  * returns an empty string until the first inject call populates it.
  *

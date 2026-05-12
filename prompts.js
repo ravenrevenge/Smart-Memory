@@ -42,6 +42,7 @@
  * buildTriggerGenerationPrompt     - asks the model for contextual trigger keywords for a single memory (Profile B)
  * buildRelationshipDeltaPrompt     - extracts per-pair relationship state changes with magnitude from a scene
  * buildEpistemicExtractionPrompt   - extracts a per-character knowledge map (knows/unaware/suspects/believes/hiding)
+ * buildStateCardPrompt              - extracts current-state fields for known entities from a message window
  *
  * Entity tagging: both extraction prompts instruct the model to append an
  * optional `:entity=Name1,Name2` suffix to the bracket tag for any memory
@@ -874,6 +875,53 @@ export function buildEpistemicExtractionPrompt(sceneText, participants) {
     `---\n\n` +
     participantHint +
     `Scene:\n${sceneText}\n\n` +
+    `Output:`
+  );
+}
+
+/**
+ * Builds the state card extraction prompt for the current message window.
+ *
+ * Asks the model to output current-state fields for each known entity whose
+ * state is visible in the excerpt. Output is sparse: only fields that are
+ * explicitly established or directly shown appear; unknown fields are omitted.
+ *
+ * Validated against Gemma (Profile B) and Qwen (Profile A). Gemma handles
+ * all cases correctly. Qwen over-infers on some fields despite strict rules -
+ * the parser filters noise values, but state ledger extraction is Profile-gated
+ * for this reason.
+ *
+ * @param {string} excerpt - Recent messages formatted as "Name: message" lines.
+ * @param {Array<{name: string, type: string}>} entityList - Entities in scope.
+ * @returns {string} The full prompt string.
+ */
+export function buildStateCardPrompt(excerpt, entityList) {
+  const entityLines = entityList.map((e) => `- ${e.name} (${e.type})`).join('\n');
+
+  return (
+    `[STATE EXTRACTION TASK - Do NOT continue the roleplay. Output structured data only.]\n\n` +
+    `You are tracking the current physical and operational state of known entities in a story.\n\n` +
+    `Known entities:\n${entityLines}\n\n` +
+    `Available fields by type:\n` +
+    `- character: location, injuries, outfit_disguise, mood, active_goal, carried_items\n` +
+    `- object: owner, location, condition, status\n` +
+    `- place: occupants, hazards, political_control, damage, accessibility\n` +
+    `- faction: leadership, objective, alliances, hostility_level\n\n` +
+    `Output one line per entity. One tag at the start of the line containing the entity\n` +
+    `name and type, then all known fields after it separated by |:\n\n` +
+    `[state:Kael:character] location=dungeon | injuries=graze on left shoulder | carried_items=silver key\n` +
+    `[state:Silver Key:object] owner=Kael | location=on Kael's person\n` +
+    `NONE\n\n` +
+    `STRICT RULES - violations produce unusable output:\n` +
+    `- ONLY include fields that are EXPLICITLY stated or DIRECTLY shown in the text.\n` +
+    `  Do not infer, deduce, or reason about what is probably true.\n` +
+    `- A field you are not certain about MUST be omitted entirely. NEVER write\n` +
+    `  fieldname=unknown, fieldname=none, fieldname=not mentioned, or any similar\n` +
+    `  placeholder. Either you know the value from the text or the field is absent.\n` +
+    `- If an entity is not mentioned in the excerpt, do not output a line for it at all.\n` +
+    `  An entity with no known fields produces no output - not a line of unknowns.\n` +
+    `- If nothing is known about any entity, output: NONE\n\n` +
+    `Excerpt:\n${excerpt}\n\n` +
     `Output:`
   );
 }

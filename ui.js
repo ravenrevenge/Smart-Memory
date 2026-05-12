@@ -65,6 +65,7 @@ import {
   PROMPT_KEY_PROFILES,
   PROMPT_KEY_RELATIONSHIPS,
   PROMPT_KEY_EPISTEMIC,
+  PROMPT_KEY_STATE_LEDGER,
 } from './constants.js';
 import {
   loadCharacterMemories,
@@ -108,6 +109,14 @@ import {
   saveEpistemicKnowledge,
   injectEpistemicKnowledge,
 } from './epistemic.js';
+import {
+  getStateCard,
+  setStateCard,
+  deleteStateCard,
+  migrateStateLedgerKey,
+  STATE_CARD_FIELDS,
+  STATE_CARD_TYPES,
+} from './state-ledger.js';
 
 // ---- Local helpers (not exported) ----------------------------------------
 
@@ -150,6 +159,7 @@ export const TOKEN_TIERS = [
   { key: PROMPT_KEY_PROFILES, label: 'Profiles', color: '#5a9ea0' },
   { key: PROMPT_KEY_RELATIONSHIPS, label: 'Relationships', color: '#c87941' },
   { key: PROMPT_KEY_EPISTEMIC, label: 'Perspectives', color: '#7a8c5a' },
+  { key: PROMPT_KEY_STATE_LEDGER, label: 'State', color: '#7a6a8a' },
 ];
 
 // Personal tiers shown in per-character group rows. Shared tiers (session,
@@ -1152,6 +1162,8 @@ export function updateEntityPanel(characterName) {
           const sessReg = loadSessionEntityRegistry();
           setEntityType(entity.id, t, ltReg);
           setEntityType(entity.id, t, sessReg);
+          // Migrate state card to the new key so it stays coupled to the entity.
+          if (t !== entity.type) await migrateStateLedgerKey(entity.name, entity.type, t);
           await persistAndRefresh();
         });
         $picker.append($opt);
@@ -1187,6 +1199,58 @@ export function updateEntityPanel(characterName) {
         $opt.on('click', async (ev) => {
           ev.stopPropagation();
           $picker.remove();
+
+          const srcCard = getStateCard(entity.name, entity.type);
+          const dstCard = getStateCard(target.name, target.type);
+
+          // If both entities have state cards, ask the user which to keep before merging.
+          if (srcCard && dstCard) {
+            const $modal = $(`
+              <div class="sm_state_merge_modal">
+                <div class="sm_state_merge_modal_inner">
+                  <div class="sm_state_merge_title">Both entities have state cards</div>
+                  <div class="sm_state_merge_body">
+                    Merging <strong>${$('<span>').text(entity.name).html()}</strong> into
+                    <strong>${$('<span>').text(target.name).html()}</strong> will discard one state card.
+                    Which card should survive?
+                  </div>
+                  <div class="sm_state_merge_actions">
+                    <button class="menu_button sm_state_keep_src">Keep "${$('<span>').text(entity.name).html()}" card</button>
+                    <button class="menu_button sm_state_keep_dst">Keep "${$('<span>').text(target.name).html()}" card</button>
+                    <button class="menu_button sm_state_cancel">Cancel</button>
+                  </div>
+                </div>
+              </div>
+            `);
+
+            const doMerge = async (keepSrc) => {
+              $modal.remove();
+              const ltReg = characterName ? loadCharacterEntityRegistry(characterName) : [];
+              const ltMems = characterName ? loadCharacterMemories(characterName) : [];
+              const sessReg = loadSessionEntityRegistry();
+              const sessMems = loadSessionMemories();
+              mergeEntitiesById(entity.id, target.id, ltReg, ltMems, sessReg, sessMems);
+              if (characterName) {
+                saveCharacterEntityRegistry(characterName, ltReg);
+                saveCharacterMemories(characterName, ltMems);
+              }
+              await saveSessionEntityRegistry(sessReg);
+              await saveSessionMemories(sessMems);
+              // Discard the loser card, copy the winner card to the surviving key.
+              await deleteStateCard(entity.name, entity.type);
+              await deleteStateCard(target.name, target.type);
+              const winnerFields = keepSrc ? srcCard : dstCard;
+              await setStateCard(target.name, target.type, winnerFields);
+              await persistAndRefresh();
+            };
+
+            $modal.find('.sm_state_keep_src').on('click', () => doMerge(true));
+            $modal.find('.sm_state_keep_dst').on('click', () => doMerge(false));
+            $modal.find('.sm_state_cancel').on('click', () => $modal.remove());
+            $('body').append($modal);
+            return;
+          }
+
           const ltReg = characterName ? loadCharacterEntityRegistry(characterName) : [];
           const ltMems = characterName ? loadCharacterMemories(characterName) : [];
           const sessReg = loadSessionEntityRegistry();
@@ -1198,6 +1262,11 @@ export function updateEntityPanel(characterName) {
           }
           await saveSessionEntityRegistry(sessReg);
           await saveSessionMemories(sessMems);
+          // If only the source had a card, copy it to the surviving (target) key.
+          if (srcCard) {
+            await deleteStateCard(entity.name, entity.type);
+            await setStateCard(target.name, target.type, srcCard);
+          }
           await persistAndRefresh();
         });
         $picker.append($opt);
@@ -1221,22 +1290,137 @@ export function updateEntityPanel(characterName) {
     $row.find('.sm_entity_delete_btn').on('click', async (e) => {
       e.stopPropagation();
       $panel.find('.sm_entity_type_picker').remove();
-      const ltReg = characterName ? loadCharacterEntityRegistry(characterName) : [];
-      const ltMems = characterName ? loadCharacterMemories(characterName) : [];
-      const sessReg = loadSessionEntityRegistry();
-      const sessMems = loadSessionMemories();
-      deleteEntityById(entity.id, ltReg, ltMems);
-      deleteEntityById(entity.id, sessReg, sessMems);
-      if (characterName) {
-        saveCharacterEntityRegistry(characterName, ltReg);
-        saveCharacterMemories(characterName, ltMems);
+
+      const doDelete = async () => {
+        const ltReg = characterName ? loadCharacterEntityRegistry(characterName) : [];
+        const ltMems = characterName ? loadCharacterMemories(characterName) : [];
+        const sessReg = loadSessionEntityRegistry();
+        const sessMems = loadSessionMemories();
+        deleteEntityById(entity.id, ltReg, ltMems);
+        deleteEntityById(entity.id, sessReg, sessMems);
+        if (characterName) {
+          saveCharacterEntityRegistry(characterName, ltReg);
+          saveCharacterMemories(characterName, ltMems);
+        }
+        await saveSessionEntityRegistry(sessReg);
+        await saveSessionMemories(sessMems);
+        // Clean up any associated state card.
+        if (STATE_CARD_TYPES.has(entity.type)) await deleteStateCard(entity.name, entity.type);
+        await persistAndRefresh();
+      };
+
+      // Warn before discarding a populated state card.
+      if (STATE_CARD_TYPES.has(entity.type) && getStateCard(entity.name, entity.type)) {
+        $row.find('.sm_delete_state_warning').remove();
+        const $warn = $(`
+          <div class="sm_delete_state_warning">
+            <span>This entity has a state card. Delete anyway?</span>
+            <button class="menu_button sm_delete_anyway">Delete</button>
+            <button class="menu_button sm_delete_cancel">Cancel</button>
+          </div>
+        `);
+        $warn.find('.sm_delete_anyway').on('click', async () => {
+          $warn.remove();
+          await doDelete();
+        });
+        $warn.find('.sm_delete_cancel').on('click', () => $warn.remove());
+        $row.append($warn);
+        return;
       }
-      await saveSessionEntityRegistry(sessReg);
-      await saveSessionMemories(sessMems);
-      await persistAndRefresh();
+
+      await doDelete();
     });
 
     $panel.append($row);
+
+    // State card subsection - only for types that support state cards.
+    if (STATE_CARD_TYPES.has(entity.type)) {
+      const fields = STATE_CARD_FIELDS[entity.type] ?? [];
+      const existingCard = getStateCard(entity.name, entity.type);
+
+      const $section = $('<div class="sm_state_card_section">');
+
+      // Summary header line: shows populated fields or a placeholder.
+      const summaryParts = existingCard
+        ? fields.filter((f) => existingCard[f]).map((f) => `${f}: ${existingCard[f]}`)
+        : [];
+      const summaryText = summaryParts.length > 0 ? summaryParts.join(' | ') : 'No state card';
+      const $header = $(
+        `<div class="sm_state_card_header sm-muted">${$('<div>').text(summaryText).html()}</div>`,
+      );
+
+      const $editBtn = $(
+        `<button class="sm_state_card_edit_btn menu_button" title="${existingCard ? 'Edit state card' : 'Add state card'}">
+          <i class="fa-solid ${existingCard ? 'fa-pen' : 'fa-plus'}"></i>
+        </button>`,
+      );
+
+      const $headerRow = $('<div class="sm_state_card_header_row">');
+      $headerRow.append($header, $editBtn);
+      $section.append($headerRow);
+
+      // Editor: hidden until the edit button is clicked.
+      const $editor = $('<div class="sm_state_card_editor" style="display:none;">');
+      const $inputs = {};
+      for (const f of fields) {
+        const $field = $('<div class="sm_state_card_field">');
+        const label = f.replace(/_/g, ' ');
+        const currentVal = existingCard?.[f] ?? '';
+        const safeId = `sm_sc_${entity.id}_${f}`;
+        $field.append(`<label for="${safeId}">${label}</label>`);
+        const $inp = $(`<input type="text" id="${safeId}" class="text_pole" value="">`);
+        $inp.val(currentVal);
+        $field.append($inp);
+        $inputs[f] = $inp;
+        $editor.append($field);
+      }
+
+      const $actions = $('<div class="sm_state_card_actions">');
+      const $saveBtn = $('<button class="menu_button">Save</button>');
+      const $cancelBtn = $('<button class="menu_button">Cancel</button>');
+      const $clearBtn = $(
+        '<button class="menu_button sm_state_card_clear_btn">Clear card</button>',
+      );
+      $actions.append($saveBtn, $cancelBtn, existingCard ? $clearBtn : null);
+      $editor.append($actions);
+      $section.append($editor);
+
+      $editBtn.on('click', (e) => {
+        e.stopPropagation();
+        const opening = !$editor.is(':visible');
+        $editor.toggle(opening);
+        const $icon = $editBtn.find('i');
+        if (opening) {
+          $icon.removeClass('fa-pen fa-plus').addClass('fa-times');
+        } else {
+          $icon.removeClass('fa-times').addClass(existingCard ? 'fa-pen' : 'fa-plus');
+        }
+      });
+
+      $saveBtn.on('click', async (e) => {
+        e.stopPropagation();
+        const newFields = {};
+        for (const f of fields) {
+          const v = ($inputs[f].val() ?? '').trim();
+          if (v) newFields[f] = v;
+        }
+        await setStateCard(entity.name, entity.type, newFields);
+        updateEntityPanel(characterName);
+      });
+
+      $cancelBtn.on('click', (e) => {
+        e.stopPropagation();
+        $editor.hide();
+      });
+
+      $clearBtn.on('click', async (e) => {
+        e.stopPropagation();
+        await deleteStateCard(entity.name, entity.type);
+        updateEntityPanel(characterName);
+      });
+
+      $panel.append($section);
+    }
   }
 }
 

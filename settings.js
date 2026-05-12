@@ -92,6 +92,7 @@ import { checkContinuity, generateRepair, injectRepair } from './continuity.js';
 import { getHardwareProfile, getEmbeddingBatch, clearEmbeddingFailed } from './embeddings.js';
 import { clearCanon, generateCanon, injectCanon, saveCanon } from './canon.js';
 import { clearSessionEntityRegistry } from './graph-migration.js';
+import { clearStateLedger, injectStateLedger } from './state-ledger.js';
 import { generateProfiles, injectProfiles, clearProfiles, loadProfiles } from './profiles.js';
 import { clearUnifiedSlot, injectUnified, maybeInjectUnified } from './unified-inject.js';
 import { showMemoryGraph } from './graph.js';
@@ -253,6 +254,14 @@ export const defaultSettings = {
   epistemic_position: extension_prompt_types.IN_CHAT,
   epistemic_role: extension_prompt_roles.SYSTEM,
 
+  // State Ledger (structured entity state cards)
+  state_ledger_enabled: false,
+  state_ledger_profile_a_override: false,
+  state_ledger_inject_budget: 200,
+  state_ledger_depth: 1,
+  state_ledger_position: extension_prompt_types.IN_CHAT,
+  state_ledger_role: extension_prompt_roles.SYSTEM,
+
   // Hardware profile - 'auto' | 'a' | 'b'
   // 'auto': detect from memory source (ollama/webllm -> A, main/openai_compat -> B)
   // 'a': force Profile A (local/low-VRAM behaviour)
@@ -296,11 +305,12 @@ const BUDGET_RATIOS = {
   longterm: 0.16,
   session: 0.13,
   scenes: 0.1,
-  arcs: 0.15,
-  canon: 0.21,
+  arcs: 0.13,
+  canon: 0.18,
   profiles: 0.13,
   relationships: 0.08,
   epistemic: 0.06,
+  state_ledger: 0.06,
 };
 
 /**
@@ -318,7 +328,8 @@ function totalBudgetFromSettings(s) {
     (s.canon_inject_budget ?? 800) +
     (s.profiles_inject_budget ?? 400) +
     (s.relationships_inject_budget ?? 250) +
-    (s.epistemic_inject_budget ?? 200)
+    (s.epistemic_inject_budget ?? 200) +
+    (s.state_ledger_inject_budget ?? 200)
   );
 }
 
@@ -339,6 +350,7 @@ function applyTotalBudget(total, s) {
   s.profiles_inject_budget = snap(total * BUDGET_RATIOS.profiles);
   s.relationships_inject_budget = snap(total * BUDGET_RATIOS.relationships);
   s.epistemic_inject_budget = snap(total * BUDGET_RATIOS.epistemic);
+  s.state_ledger_inject_budget = snap(total * BUDGET_RATIOS.state_ledger);
 }
 
 /**
@@ -422,12 +434,16 @@ export function loadSettings() {
       extension_settings[MODULE_NAME].longterm_consolidate;
   }
 
-  // Profile A gating: epistemic extraction requires a reasoning-capable model.
-  // Disable it on Profile A unless the user has explicitly opted in, so that
-  // importing someone else's settings file cannot accidentally activate it.
+  // Profile A gating: epistemic and state ledger extraction require a
+  // reasoning-capable model. Disable on Profile A unless the user has
+  // explicitly opted in, so that importing someone else's settings cannot
+  // accidentally activate them.
   const activeProfile = getHardwareProfile();
   if (activeProfile === 'a' && !extension_settings[MODULE_NAME].epistemic_profile_a_override) {
     extension_settings[MODULE_NAME].epistemic_enabled = false;
+  }
+  if (activeProfile === 'a' && !extension_settings[MODULE_NAME].state_ledger_profile_a_override) {
+    extension_settings[MODULE_NAME].state_ledger_enabled = false;
   }
 }
 
@@ -812,9 +828,10 @@ export function bindSettingsUI(ctrl) {
       $(this).toggleClass('sm-gated', !isB);
       $(this).find('input, select, button').prop('disabled', !isB);
     });
-    // Show the Profile A notice in the Perspectives & Secrets section when
-    // the active profile is A, so the user understands why the toggle is off.
+    // Show Profile A notices when the active profile is A, so the user
+    // understands why those toggles are off.
     $('#sm_epistemic_profile_a_notice').toggle(!isB);
+    $('#sm_state_ledger_profile_a_notice').toggle(!isB);
   }
 
   $('#sm_hardware_profile')
@@ -1430,6 +1447,57 @@ export function bindSettingsUI(ctrl) {
       saveSettingsDebounced();
     });
 
+  // ---- State Ledger bindings ---------------------------------------------
+
+  $('#sm_state_ledger_enabled')
+    .prop('checked', s.state_ledger_enabled ?? false)
+    .on('change', function () {
+      extension_settings[MODULE_NAME].state_ledger_enabled = $(this).prop('checked');
+      saveSettingsDebounced();
+      injectStateLedger();
+    });
+
+  $('#sm_state_ledger_profile_a_override')
+    .prop('checked', s.state_ledger_profile_a_override ?? false)
+    .on('change', function () {
+      extension_settings[MODULE_NAME].state_ledger_profile_a_override = $(this).prop('checked');
+      saveSettingsDebounced();
+      injectStateLedger();
+    });
+
+  $('#sm_state_ledger_inject_budget_value').text(s.state_ledger_inject_budget ?? 200);
+  $('#sm_state_ledger_inject_budget')
+    .val(s.state_ledger_inject_budget ?? 200)
+    .on('input', function () {
+      const v = parseInt($(this).val(), 10);
+      extension_settings[MODULE_NAME].state_ledger_inject_budget = v;
+      $('#sm_state_ledger_inject_budget_value').text(v);
+      saveSettingsDebounced();
+    });
+
+  $(`input[name="sm_state_ledger_position"][value="${s.state_ledger_position ?? 1}"]`).prop(
+    'checked',
+    true,
+  );
+  $('input[name="sm_state_ledger_position"]').on('change', function () {
+    extension_settings[MODULE_NAME].state_ledger_position = parseInt($(this).val(), 10);
+    saveSettingsDebounced();
+  });
+
+  $('#sm_state_ledger_depth')
+    .val(s.state_ledger_depth ?? 1)
+    .on('input', function () {
+      extension_settings[MODULE_NAME].state_ledger_depth = parseInt($(this).val(), 10);
+      saveSettingsDebounced();
+    });
+
+  $('#sm_state_ledger_role')
+    .val(s.state_ledger_role ?? 0)
+    .on('change', function () {
+      extension_settings[MODULE_NAME].state_ledger_role = parseInt($(this).val(), 10);
+      saveSettingsDebounced();
+    });
+
   // Show/hide the target field when type changes to/from "hiding".
   $('#sm_ep_type').on('change', function () {
     $('.sm_ep_target_field').toggle($(this).val() === 'hiding');
@@ -1597,6 +1665,7 @@ export function bindSettingsUI(ctrl) {
     injectMemories(null).catch(console.error);
     injectRelationshipHistory(null);
     injectEpistemicKnowledge(null, null);
+    injectStateLedger();
     setStatusMessage('Memories cleared.');
   });
 
@@ -1697,7 +1766,9 @@ export function bindSettingsUI(ctrl) {
       return;
     await clearSessionMemories();
     await clearSessionEntityRegistry();
+    await clearStateLedger();
     injectSessionMemories();
+    injectStateLedger();
     updateSessionUI();
     setStatusMessage('Session memories cleared.');
   });
@@ -2296,6 +2367,7 @@ export function bindSettingsUI(ctrl) {
     await clearArcs();
     await clearArcSummaries();
     await clearProfiles();
+    await clearStateLedger();
     await context.saveMetadata();
 
     // Clearing chatMetadata means loadAndInjectSummary will clear the slot.
@@ -2304,6 +2376,7 @@ export function bindSettingsUI(ctrl) {
     injectSceneHistory();
     injectArcs();
     injectProfiles(characterName);
+    injectStateLedger();
 
     updateShortTermUI(null);
     updateSessionUI();
@@ -2353,6 +2426,7 @@ export function bindSettingsUI(ctrl) {
     await clearArcs();
     await clearArcSummaries();
     await clearProfiles(characterName);
+    await clearStateLedger();
     // Dismiss any open recap modal.
     $('#sm_recap_overlay').remove();
 
@@ -2365,6 +2439,7 @@ export function bindSettingsUI(ctrl) {
     injectSceneHistory();
     injectArcs();
     injectProfiles(characterName);
+    injectStateLedger();
 
     updateShortTermUI(null);
     updateLongTermUI(characterName);

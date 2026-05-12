@@ -1677,6 +1677,146 @@ body.sm-read-only .mes_edit_delete {
   display: none !important;
 }
 
+/* ── State card subsection ───────────────────────────────────────────────── */
+
+#smart_memory_settings .sm_state_card_section {
+  margin: 0 0 4px 12px;
+  padding: 4px 8px;
+  border-left: 2px solid rgba(122, 106, 138, 0.35);
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 0 4px 4px 0;
+}
+
+#smart_memory_settings .sm_state_card_header_row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#smart_memory_settings .sm_state_card_header {
+  flex: 1;
+  font-size: 0.75em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#smart_memory_settings .sm_state_card_edit_btn {
+  padding: 2px 5px;
+  font-size: 0.72em;
+  flex-shrink: 0;
+  opacity: 0.6;
+  transition: opacity 0.15s;
+}
+
+#smart_memory_settings .sm_state_card_edit_btn:hover {
+  opacity: 1;
+}
+
+#smart_memory_settings .sm_state_card_editor {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+#smart_memory_settings .sm_state_card_field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#smart_memory_settings .sm_state_card_field label {
+  font-size: 0.75em;
+  width: 110px;
+  flex-shrink: 0;
+  text-align: right;
+  opacity: 0.7;
+  text-transform: capitalize;
+}
+
+#smart_memory_settings .sm_state_card_field input {
+  flex: 1;
+  font-size: 0.8em;
+  padding: 2px 5px;
+}
+
+#smart_memory_settings .sm_state_card_actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+#smart_memory_settings .sm_state_card_clear_btn {
+  margin-left: auto;
+  color: #c06060;
+  opacity: 0.7;
+}
+
+#smart_memory_settings .sm_state_card_clear_btn:hover {
+  opacity: 1;
+}
+
+/* ── Entity delete state-card warning ────────────────────────────────────── */
+
+#smart_memory_settings .sm_delete_state_warning {
+  margin-top: 4px;
+  padding: 5px 8px;
+  background: rgba(180, 80, 60, 0.12);
+  border: 1px solid rgba(180, 80, 60, 0.35);
+  border-radius: 4px;
+  font-size: 0.78em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#smart_memory_settings .sm_delete_state_warning span {
+  flex: 1;
+}
+
+/* ── State card merge conflict modal ─────────────────────────────────────── */
+
+.sm_state_merge_modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sm_state_merge_modal_inner {
+  background: var(--SmartThemeBodyColor, #1a1a1a);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  padding: 20px 24px;
+  max-width: 400px;
+  width: 90%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sm_state_merge_title {
+  font-size: 0.95em;
+  font-weight: 600;
+}
+
+.sm_state_merge_body {
+  font-size: 0.82em;
+  opacity: 0.85;
+  line-height: 1.5;
+}
+
+.sm_state_merge_actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 /* ── Unified injection sub-settings ─────────────────────────────────────── */
 
 /* Visual nesting indicator for the position/depth/role controls that belong to

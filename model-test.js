@@ -27,6 +27,8 @@
  * TEST_MESSAGES              - messages for the main scenario
  * EPISTEMIC_TEST_CHARACTERS  - characters in the Mira/Sera/Ryn/Dael epistemic scenario
  * EPISTEMIC_TEST_MESSAGES    - messages for the epistemic scenario
+ * STATE_TEST_ENTITIES        - entities in the dungeon state ledger scenario
+ * STATE_TEST_MESSAGES        - messages for the state ledger scenario
  */
 
 import { extension_settings } from '../../../extensions.js';
@@ -38,14 +40,17 @@ import {
   buildSessionExtractionPrompt,
   buildArcExtractionPrompt,
   buildEpistemicExtractionPrompt,
+  buildStateCardPrompt,
 } from './prompts.js';
 import {
   parseExtractionOutput,
   parseSessionOutput,
   parseArcOutput,
   parseEpistemicResponse,
+  parseStateCardResponse,
 } from './parsers.js';
 import { isEpistemicEnabled } from './epistemic.js';
+import { isStateLedgerEnabled } from './state-ledger.js';
 
 // ---- Test fixture -----------------------------------------------------------
 
@@ -242,6 +247,52 @@ export const TEST_MESSAGES = [
   },
 ];
 
+// State ledger test scenario: a dungeon heist excerpt.
+// Designed to exercise current-vs-past state (Kael's clothes changed, key changed hands),
+// sparse output (Lyria is mentioned by name only - no visible state), and multiple
+// entity types (character, object, place, faction) in a single scene.
+//
+// Expected correct extraction signals:
+//   [state:Kael:character]     - outfit_disguise = guard disguise (not his original clothes)
+//                              - injuries present (took a graze in the earlier fight)
+//                              - carried_items = silver key
+//                              - location = dungeon interior
+//   [state:Silver Key:object]  - owner = Kael (formerly in the steward's possession)
+//                              - location = on Kael's person
+//   [state:Dungeon:place]      - occupants = Kael and 2 guards
+//   NO line for Lyria          - only mentioned, no observable state
+// A model that writes fieldname=unknown or produces a line for Lyria is unsuitable.
+export const STATE_TEST_ENTITIES = [
+  { name: 'Kael', type: 'character' },
+  { name: 'Lyria', type: 'character' },
+  { name: 'Silver Key', type: 'object' },
+  { name: 'Dungeon', type: 'place' },
+  { name: 'The Watch', type: 'faction' },
+];
+
+export const STATE_TEST_MESSAGES = [
+  {
+    name: 'Kael',
+    text: "The graze on my shoulder had stopped bleeding by the time I reached the lower passage. I pulled the guard's cloak tighter - the fit was poor but the badge on the chest was what mattered.",
+  },
+  {
+    name: 'Kael',
+    text: 'Two sentries at the far end, talking. Neither looked toward me. I had maybe thirty seconds before the patrol rotation brought the third one back around.',
+  },
+  {
+    name: 'Lyria',
+    text: 'Kael. Did you get it?',
+  },
+  {
+    name: 'Kael',
+    text: 'The steward had it on him, not in the vault. Cost me the better part of that fight to get it loose without him raising an alarm.',
+  },
+  {
+    name: 'Kael',
+    text: 'The silver key. It is in my pocket. Now can we please move before those sentries finish their conversation.',
+  },
+];
+
 // ---- Tier definitions -------------------------------------------------------
 
 // Each tier defines which setting gates it, how to run it, how to parse it,
@@ -295,6 +346,33 @@ const TIER_DEFS = [
     },
   },
   {
+    key: 'state_ledger',
+    name: 'State Ledger',
+    // State Ledger has its own enable gate combining state_ledger_enabled and profile.
+    enabledKey: null,
+    hint:
+      'Should extract current physical state for Kael (guard disguise, shoulder graze, ' +
+      'carrying the silver key), the Silver Key (owner = Kael), and the Dungeon (sentries present). ' +
+      'Lyria is mentioned but has no observable state - no line should appear for her. ' +
+      'The Watch has no mention in the scene - no line should appear for them either. ' +
+      'Any field value of "unknown", "none", or similar placeholder means the model is padding ' +
+      'output rather than omitting unknowns - this indicates the model is unsuitable for state extraction.',
+    responseLength: 300,
+    buildPrompt: () => {
+      const excerpt = STATE_TEST_MESSAGES.map((m) => `${m.name}: ${m.text}`).join('\n\n');
+      return buildStateCardPrompt(excerpt, STATE_TEST_ENTITIES);
+    },
+    parse: (response) => {
+      const parsed = parseStateCardResponse(response || '');
+      const items = [];
+      for (const [key, fields] of parsed.entries()) {
+        const fieldParts = Object.entries(fields).map(([k, v]) => `${k}=${v}`);
+        items.push(`[state:${key}] ${fieldParts.join(' | ')}`);
+      }
+      return { items, count: items.length };
+    },
+  },
+  {
     key: 'epistemic',
     name: 'Perspectives & Secrets',
     // Epistemic has its own enable gate combining epistemic_enabled and profile.
@@ -344,14 +422,17 @@ export async function runModelTest() {
   const tiers = [];
 
   for (const def of TIER_DEFS) {
-    // Epistemic tier uses isEpistemicEnabled() instead of a plain settings key.
+    // Epistemic and State Ledger tiers use their own enable gate functions rather
+    // than a plain settings key, because they also factor in the hardware profile.
     if (def.enabledKey === null) {
-      if (!isEpistemicEnabled()) continue;
+      if (def.key === 'epistemic' && !isEpistemicEnabled()) continue;
+      if (def.key === 'state_ledger' && !isStateLedgerEnabled()) continue;
     } else if (!(settings[def.enabledKey] ?? true)) {
       continue;
     }
 
-    // Epistemic tier uses its own test history; all other tiers use the shared one.
+    // Epistemic and State Ledger tiers use their own test scenarios.
+    // All other tiers use the shared chat history.
     const prompt = def.buildPrompt(chatHistory);
     smLog(
       `[ModelTest] Prompt length for "${def.name}": ${prompt.length} chars (~${Math.round(prompt.length / 4)} tokens)`,

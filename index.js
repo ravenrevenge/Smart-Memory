@@ -61,6 +61,7 @@ import {
   PROMPT_KEY_TRIGGERED,
   PROMPT_KEY_RELATIONSHIPS,
   PROMPT_KEY_EPISTEMIC,
+  PROMPT_KEY_STATE_LEDGER,
 } from './constants.js';
 import { memory_sources, abortCurrentMemoryGeneration } from './generate.js';
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
@@ -132,6 +133,11 @@ import {
   injectEpistemicKnowledge,
   loadAndInjectEpistemicKnowledge,
 } from './epistemic.js';
+import {
+  runStateCardExtraction,
+  injectStateLedger,
+  loadAndInjectStateLedger,
+} from './state-ledger.js';
 import {
   setStatusMessage,
   updateShortTermUI,
@@ -372,6 +378,7 @@ function clearAllInjections() {
   setExtensionPrompt(PROMPT_KEY_TRIGGERED, '', none, 0);
   setExtensionPrompt(PROMPT_KEY_RELATIONSHIPS, '', none, 0);
   setExtensionPrompt(PROMPT_KEY_EPISTEMIC, '', none, 0);
+  setExtensionPrompt(PROMPT_KEY_STATE_LEDGER, '', none, 0);
   clearUnifiedSlot();
   updateTokenDisplay();
 }
@@ -742,6 +749,14 @@ async function onCharacterMessageRendered() {
           total += count;
         }
 
+        if (chatChanged()) throw CHAT_SWITCHED;
+        if (!isFreshStart()) {
+          await runStateCardExtraction(characterName, longtermWindow).catch((err) => {
+            console.error('[SmartMemory] State ledger extraction error:', err);
+          });
+          injectStateLedger(true);
+        }
+
         // Regenerate profiles after each extraction pass so they reflect the
         // latest memories. Sequential - same constraint as the other tiers.
         // Skipped in freshStart chats - no new memories were written so
@@ -964,6 +979,7 @@ async function onChatChangedImpl() {
     await injectMemories(selectedGroupCharacter);
     injectRelationshipHistory(selectedGroupCharacter);
     loadAndInjectEpistemicKnowledge(selectedGroupCharacter, selectedGroupCharacter);
+    loadAndInjectStateLedger();
     await injectSessionMemories();
     injectCanon(selectedGroupCharacter);
     injectProfiles(selectedGroupCharacter);
@@ -1051,6 +1067,7 @@ async function onChatChangedImpl() {
   await injectMemories(characterName);
   injectRelationshipHistory(characterName);
   loadAndInjectEpistemicKnowledge(characterName, characterName);
+  loadAndInjectStateLedger();
 
   await injectSessionMemories();
   injectSceneHistory();
@@ -1536,6 +1553,14 @@ async function onGroupWrapperFinished({ type } = {}) {
                 if (changed) saveGroupPersistentArcs(groupId, groupPersistent);
               }
             }
+          }
+
+          if (chatChanged()) throw CHAT_SWITCHED;
+          if (!isFreshStart()) {
+            await runStateCardExtraction(null, longtermWindow).catch((err) => {
+              console.error('[SmartMemory] State ledger extraction error:', err);
+            });
+            injectStateLedger(true);
           }
 
           // Profile B only: auto-regenerate canon per responding character when

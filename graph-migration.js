@@ -39,6 +39,7 @@
  * assertNonDestructive         - throws if a migration step deleted or overwrote a pre-existing field
  * applyMigrations              - drives the step loop and calls assertNonDestructive after each step
  * migrateCharacter_v8          - adds epistemic_knowledge array and backfills witnessed_by on memories
+ * migrateChat_v9               - adds state_ledger map for structured entity state cards
  */
 
 import { saveSettingsDebounced } from '../../../../script.js';
@@ -868,6 +869,11 @@ function migrateCharacter_v8(charData) {
   return { ...charData, epistemic_knowledge: [], memories };
 }
 
+function migrateChat_v9(chatMeta) {
+  if (Object.prototype.hasOwnProperty.call(chatMeta, 'state_ledger')) return chatMeta;
+  return { ...chatMeta, state_ledger: {} };
+}
+
 // ---- Step registries --------------------------------------------------------
 // Map<version, stepFn | { fn, deletePaths }> - add new entries here when
 // SCHEMA_VERSION is bumped. Use { fn, deletePaths } only when a step
@@ -889,6 +895,7 @@ const CHAT_MIGRATIONS = new Map([
   [3, { fn: migrateChat_v3, deletePaths: ['profiles'] }],
   // v5 renames entities -> sessionEntities.
   [5, { fn: migrateChat_v5, deletePaths: ['entities'] }],
+  [9, migrateChat_v9],
 ]);
 
 // ---- Migration runner -------------------------------------------------------

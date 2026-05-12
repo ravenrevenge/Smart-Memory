@@ -36,6 +36,7 @@
  * parseTriggerResponse           - parses the comma-separated keyword list from a trigger generation response
  * parseRelationshipDeltaResponse - parses per-pair relationship state changes with magnitude from a delta response
  * parseEpistemicResponse         - parses the five-tag knowledge map output from an epistemic extraction pass
+ * parseStateCardResponse         - parses structured current-state field output into a Map of key -> fields
  *
  * All new memory objects produced by the parse functions carry the full graph
  * field set (id, source_messages, entities, time_scope, valid_from, valid_to,
@@ -664,4 +665,77 @@ export function parseEpistemicResponse(text) {
   }
 
   return entries;
+}
+
+// ---- State card parser ------------------------------------------------------
+
+/**
+ * Noise values that parsers must strip - placeholder strings Qwen emits instead
+ * of omitting unknown fields as instructed.
+ */
+const STATE_NOISE_VALUES = new Set([
+  'unknown',
+  'none',
+  'none mentioned',
+  'not mentioned',
+  'n/a',
+  'na',
+  'unspecified',
+]);
+
+/**
+ * Parses the structured state card extraction output into a Map of ledger key
+ * to fields object.
+ *
+ * Expected input format (one entity per line):
+ *   [state:EntityName:type] field=value | field=value
+ *
+ * Noise values (unknown, none, none mentioned, etc.) are stripped per field.
+ * Entity entries where no fields survive filtering are dropped entirely.
+ *
+ * @param {string} raw - Raw model response text.
+ * @returns {Map<string, Object>} Map keyed by `name|type`, values are field objects.
+ */
+export function parseStateCardResponse(raw) {
+  const result = new Map();
+  if (!raw) return result;
+
+  // Match [state:EntityName:type] at the start of each line.
+  const lineRe = /\[state:([^\]]+):([^\]]+)\]\s*(.*)$/i;
+
+  for (const line of raw.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.toUpperCase() === 'NONE') continue;
+
+    const match = lineRe.exec(trimmed);
+    if (!match) continue;
+
+    const name = match[1].trim();
+    const type = match[2].trim().toLowerCase();
+    const rest = match[3].trim();
+
+    if (!name || !type || !rest) continue;
+
+    const fields = {};
+    for (const chunk of rest.split('|')) {
+      const eqIdx = chunk.indexOf('=');
+      if (eqIdx === -1) continue;
+      const fieldName = chunk.slice(0, eqIdx).trim().toLowerCase().replace(/\s+/g, '_');
+      const value = chunk.slice(eqIdx + 1).trim();
+      if (!fieldName || !value) continue;
+      // Strip noise values - do not store placeholders.
+      if (STATE_NOISE_VALUES.has(value.toLowerCase())) continue;
+      fields[fieldName] = value;
+    }
+
+    // Drop the entry if no valid fields survived filtering.
+    if (Object.keys(fields).length === 0) continue;
+
+    const key = `${name.toLowerCase().trim()}|${type}`;
+    // Merge with any earlier line for the same key (model may split across lines).
+    const existing = result.get(key) ?? {};
+    result.set(key, { ...existing, ...fields });
+  }
+
+  return result;
 }

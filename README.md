@@ -114,6 +114,23 @@ The **Perspectives & Secrets** section in the settings panel shows all extracted
 
 Long-term memories also benefit: memories extracted from a scene the responding character was not present for are labelled `[secondhand]` in their injection, so the AI knows the character learned this through hearsay rather than direct experience. This can be turned off to omit non-witnessed memories entirely.
 
+### State Ledger
+
+The State Ledger tracks the current observable physical and operational state of named entities as a compact snapshot injected near the active turn. Where long-term memory records permanent facts ("Kael was once a soldier") and session memory records developing details, the State Ledger answers right now questions: where is Kael standing, what is he wearing, what is he carrying, what is the room's current state.
+
+State cards are maintained per entity type:
+
+- **Character** - location, injuries, outfit/disguise, mood, active goal, carried items
+- **Object** - owner, location, condition, status
+- **Place** - occupants, hazards, political control, damage, accessibility
+- **Faction** - leadership, objective, alliances, hostility level
+
+Extraction runs once per session against the current message window. State cards are chat-scoped and do not carry over when a new chat begins. Cards can also be filled in or edited manually from the entity panel - click the edit button below any entity row to open the field editor.
+
+When you merge two entities that both have state cards, a modal asks which card to keep. Deleting an entity with a state card shows a warning before proceeding. Changing an entity's type migrates its state card to the new type automatically.
+
+The section is off by default on Profile A hardware (local/low-VRAM) because weaker models tend to pad unknown fields with placeholder values - an override toggle enables it when the local model is reasoning-capable.
+
 ### Session Memory - Within-Chat Details
 
 Granular details from the current session: scene descriptions, things that were revealed, how the relationship shifted, specific objects or places that came up. More detailed than long-term memory, and scoped to this chat only - it does not carry forward to future sessions, but it keeps the AI sharp on the specifics of what is happening right now.
@@ -405,6 +422,16 @@ ollama pull nomic-embed-text
 | Injection position                    | In-chat        | Where the knowledge block appears in the prompt                                                                            |
 | Injection depth                       | 1              | Distance from the user prompt (lower = closer); depth 1 places it right after the most recent context                     |
 
+### State Ledger
+
+| Setting                | Default         | Description                                                                                                              |
+| ---------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Enable State Ledger    | Off (Profile B) | Extract and inject current entity state cards. Off by default on Profile A; enable with the override                    |
+| Enable on Profile A    | Off             | Override to run state extraction on Profile A hardware. Requires a reasoning-capable local model                         |
+| Injection token budget | 200             | Budget for the state block; funded from within the shared total                                                          |
+| Injection position     | In-chat         | Where the state block appears in the prompt                                                                              |
+| Injection depth        | 1               | Distance from the user prompt (lower = closer)                                                                           |
+
 ### Long-term Memory
 
 | Setting                    | Default                                               | Description                                                                                                                                                                                        |
@@ -593,6 +620,7 @@ Smart Memory's defaults are designed to layer cleanly alongside SillyTavern's Ve
 
 | Tier                   | Position          | Notes                                           |
 | ---------------------- | ----------------- | ----------------------------------------------- |
+| State Ledger           | In-chat @ depth 1 | Current entity state, alongside Perspectives    |
 | Perspectives & Secrets | In-chat @ depth 1 | Per-character knowledge block, closest to reply |
 | Arcs                   | In-chat @ depth 2 | Shares depth with ST chat vectors intentionally |
 | Session                | In-chat @ depth 3 | Just above ST's default vector depth            |
@@ -629,6 +657,7 @@ Each memory tier exposes a macro token you can place anywhere in a character car
 | `{{smartmemory-canon}}`         | Canon                     |
 | `{{smartmemory-profiles}}`      | Profiles                  |
 | `{{smartmemory-epistemic}}`     | Perspectives & Secrets    |
+| `{{smartmemory-stateledger}}`   | State Ledger              |
 | `{{smartmemory-unified}}`       | Unified block (see below) |
 
 Place any token in the **Main Prompt**, **Description**, **Personality summary**, **Scenario**, or **Examples of dialogue** fields of a character card. Smart Memory detects the token automatically and activates macro mode for that tier - no settings change needed.
