@@ -838,10 +838,13 @@ export function bindSettingsUI(ctrl) {
     const $btn = $(this);
     const $result = $('#sm_model_test_result');
 
-    // If a test is already running, cancel it.
+    // If a test is already running, cancel it and give immediate feedback.
     if (modelTestRunning) {
       modelTestRunning = false;
       stopGeneration();
+      $btn
+        .prop('disabled', true)
+        .html('<i class="fa-solid fa-spinner fa-spin"></i> <span>Cancelling...</span>');
       return;
     }
 
