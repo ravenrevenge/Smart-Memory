@@ -291,15 +291,19 @@ export function buildArcExtractionPrompt(chatHistory, existingArcs) {
 ${existingSection}CONVERSATION:\n${chatHistory}
 
 ---
-Extract open story threads - unresolved conflicts, promises made, character goals, mysteries introduced, tensions established.
+Extract open story threads from the conversation: unresolved conflicts, unfulfilled promises, active character goals, open mysteries, and tensions that have not yet played out.
+
+An arc is something still in motion - a question not yet answered, a goal not yet reached, a conflict still active. Do NOT output facts about things that already happened and are over.
 
 Output format - one entry per line, two tags allowed:
   [arc] <new unresolved thread from this conversation, not already listed above>
   [resolved] <title or brief description of an existing arc that was explicitly closed>
 
-Example output:
-  [arc] Mira swore revenge on the merchant who sold her into slavery.
+Examples:
+  [arc] Mira swore revenge on the merchant - she has not acted on it yet.
+  [arc] The identity of whoever burned the granary is still unknown.
   [resolved] The missing heir was found alive in the northern keep.
+  NOT an arc: "Kira was captured by the guards." - this is a fact, not an open thread.
 
 Only output [arc] for threads that are NEW in this conversation - do not re-output existing arcs.
 Only mark [resolved] if the conversation directly closes the arc - a promise kept, a mystery answered, a conflict ended. A related revelation is NOT a resolution. If new information makes an existing arc more urgent or complicated, it stays open.
