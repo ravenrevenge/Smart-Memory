@@ -64,7 +64,7 @@ Embeddings let Smart Memory compare memories by meaning rather than exact wordin
 
 ### 3. Leave the memory context budget alone (for now)
 
-The default **Memory context budget** in simple mode is 3100 tokens - the combined total of all memory tiers at their default sizes. This number was chosen to work well with the recommended Qwen3 model. If you reduce it, one or more tiers will start getting trimmed or cut off entirely to fit the lower limit, which may noticeably affect quality. Leave it at the default until you have a feel for how Smart Memory works in your setup, then adjust carefully in small steps if needed.
+The default **Memory context budget** in simple mode is 3100 tokens - the combined total of all memory tiers at their default sizes. This number was chosen to work well with the recommended local models. If you reduce it, one or more tiers will start getting trimmed or cut off entirely to fit the lower limit, which may noticeably affect quality. Leave it at the default until you have a feel for how Smart Memory works in your setup, then adjust carefully in small steps if needed.
 
 That's it - Smart Memory will start building memories automatically from your next chat.
 
@@ -209,17 +209,17 @@ If you are on limited VRAM (8GB or less), keep the Message Limit extension enabl
 
 ### Recommended local models
 
-These models have been tested against Smart Memory's extraction prompts. They are listed in order of extraction quality - each step down trades precision for a smaller footprint.
+These models have been tested against Smart Memory's extraction prompts. They are listed in order of recommendation - each step down trades quality or precision for a smaller footprint or faster extraction.
 
-[**`huihui_ai/qwen3-vl-abliterated:30b`**](https://ollama.com/huihui_ai/qwen3-vl-abliterated) (20 GB) - best quality. Understands complex emotional undercurrents and relationship dynamics with noticeably higher precision than the 8B model. Requires substantial VRAM - only suitable if you have 24 GB or more available.
+[**`huihui_ai/gemma4-abliterated:e4b-it`**](https://ollama.com/huihui_ai/gemma4-abliterated) - primary recommendation. Passes all extraction tests cleanly. Produces sharp, precise character facts, well-formed arc descriptions, and accurate session details. Does not over-extract - what it finds is genuinely there. The abliterated variant handles explicit roleplay content without refusals. The trade-off is speed: Gemma 4 is a reasoning model and thinks before each extraction pass, so it takes longer per message than Qwen. If output quality matters more than extraction speed, this is the model to use. See [Reasoning models](#reasoning-models) below for setup notes.
 
-[**`huihui_ai/qwen3-vl-abliterated:8b-instruct`**](https://ollama.com/huihui_ai/qwen3-vl-abliterated) (6.1 GB) - primary recommendation for most users. Produces accurate character facts, correctly infers preferences from subtext, and reliably identifies open narrative threads. The abliterated variant handles explicit roleplay content without refusals. If you have the VRAM, use this one.
+[**`huihui_ai/qwen3-vl-abliterated:30b`**](https://ollama.com/huihui_ai/qwen3-vl-abliterated) (20 GB) - high coverage. Understands complex emotional undercurrents and relationship dynamics. Extracts more items per pass than Gemma 4 - useful if you prefer broader coverage over precision. Requires substantial VRAM - only suitable if you have 24 GB or more available.
 
-[**`mistral:7b`**](https://ollama.com/library/mistral) (4.1 GB) - solid fallback when VRAM is tight. Extraction quality is lower than Qwen across all tiers - character details are sometimes less precise, session memory undercounts on shorter exchanges, and arc descriptions tend to be vaguer. Still functional and worth using if the 2GB saving matters to you, for example to leave headroom for the embedding model alongside your roleplay model.
+[**`huihui_ai/qwen3-vl-abliterated:8b-instruct`**](https://ollama.com/huihui_ai/qwen3-vl-abliterated) (6.1 GB) - good balance of quality and speed. Produces accurate character facts and reliably identifies open narrative threads without the reasoning overhead of Gemma 4. Can over-extract on arcs and session memory - tends to file more items than strictly necessary. The abliterated variant handles explicit roleplay content without refusals.
+
+[**`mistral:7b`**](https://ollama.com/library/mistral) (4.1 GB) - solid fallback when VRAM is tight. Extraction quality is lower across all tiers - character details are sometimes less precise, session memory undercounts on shorter exchanges, and arc descriptions tend to be vaguer. Still functional and worth using if the 2 GB saving over Qwen matters to you.
 
 [**`gemma3:4b`**](https://ollama.com/library/gemma3) (3.3 GB) - lightest option, but the quality gap is meaningful. On shorter exchanges it can misread character traits, occasionally produces duplicate entries in a single pass, and is more prone to extracting from prompt examples rather than conversation content on complex prompts. Use it only if 4 GB is a hard limit and you accept that memory quality will be noticeably lower than the models above.
-
-**Honorable mention: [`huihui_ai/gemma4-abliterated:e4b-it`](https://ollama.com/huihui_ai/gemma4-abliterated) (various sizes)** - extracts fewer items per pass than Qwen but what it does extract tends to be more precise. It identifies genuinely unresolved narrative threads rather than listing developing emotions as arcs, and its character facts are sharply drawn. It will not pass the built-in model test's quantity thresholds, but the output quality is real. Worth trying if you prefer accuracy over coverage, or if you find Qwen over-extracts for your style of roleplay. Note that this is a reasoning model - see [Reasoning models](#reasoning-models) below for setup notes.
 
 Smart Memory's prompts are longer than typical chat prompts - a model that works fine for roleplay may still struggle with extraction if the combined prompt length exceeds its effective context window. If you get empty or garbled extraction output with a different model, context overflow is the most likely cause. Use the **Test Extraction Model** button to check any model before committing to it.
 
@@ -234,7 +234,7 @@ Reasoning block stripping uses SillyTavern's own reasoning template system, so a
 
 If no template is configured, or the template does not match what your model outputs, the reasoning block will pass through to the parsers. The tagged-line parsers (long-term, session, arcs) will silently discard it since they only match `[type]` tagged lines - but parsers that produce free-form output (profiles, relationship history, continuity) may be affected. Setting the correct template in ST is recommended for any reasoning model.
 
-Note that reasoning models are generally not recommended as the memory LLM - the thinking block consumes significant context and generation time without improving extraction quality over a good non-reasoning model. If you do use one, make sure thinking is not disabled at the model level, as some reasoning models produce poor output without their reasoning enabled.
+The trade-off with reasoning models is speed: the thinking block adds time before each extraction pass. If you are on limited hardware and extraction latency is a concern, a non-reasoning model like Qwen3 will be faster. If you prioritize extraction quality and can tolerate the wait, Gemma 4's reasoning produces noticeably better output. Either way, make sure thinking is not disabled at the model level - some reasoning models produce poor output without their reasoning enabled.
 
 ### Testing your model
 
