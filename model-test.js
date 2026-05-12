@@ -333,11 +333,12 @@ const TIER_DEFS = [
     name: 'Story Arcs',
     enabledKey: 'arcs_enabled',
     hint:
-      'Should identify exactly the three open threads in this scenario: Yara must reach ' +
-      'Vethara and get Daven out before the Pact moves him; an unknown party is surveilling ' +
-      'them and has not been identified; Cael is deceiving his handler and will face ' +
-      'consequences if discovered. None of these resolve in the conversation. ' +
-      'A capable model finds all three and nothing else.',
+      'Should identify the open threads in this scenario: Yara must reach Vethara and get ' +
+      'Daven out before the Pact moves him; an unknown party is surveilling them and has not ' +
+      'been identified; Cael is waiting on a contact reply that may identify the watchers; ' +
+      'Cael is deceiving his handler and will face consequences if discovered. None of these ' +
+      'resolve in the conversation. A capable model finds 3-4 of these and does not output ' +
+      'declarative facts about events that already happened.',
     responseLength: 400,
     buildPrompt: (history) => buildArcExtractionPrompt(history, ''),
     parse: (response) => {
