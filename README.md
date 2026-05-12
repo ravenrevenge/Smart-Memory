@@ -424,13 +424,12 @@ ollama pull nomic-embed-text
 
 ### State Ledger
 
-| Setting                | Default         | Description                                                                                                              |
-| ---------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| Enable State Ledger    | Off (Profile B) | Extract and inject current entity state cards. Off by default on Profile A; enable with the override                    |
-| Enable on Profile A    | Off             | Override to run state extraction on Profile A hardware. Requires a reasoning-capable local model                         |
-| Injection token budget | 200             | Budget for the state block; funded from within the shared total                                                          |
-| Injection position     | In-chat         | Where the state block appears in the prompt                                                                              |
-| Injection depth        | 1               | Distance from the user prompt (lower = closer)                                                                           |
+| Setting                | Default | Description                                                                                                                                              |
+| ---------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Enable State Ledger    | Off     | Extract and inject current entity state cards. On Profile A hardware a confirmation is shown first - this feature works best with a reasoning-capable model |
+| Injection token budget | 200     | Budget for the state block; funded from within the shared total                                                                                          |
+| Injection position     | In-chat | Where the state block appears in the prompt                                                                                                              |
+| Injection depth        | 1       | Distance from the user prompt (lower = closer)                                                                                                           |
 
 ### Long-term Memory
 

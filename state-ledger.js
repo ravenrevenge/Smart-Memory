@@ -82,17 +82,14 @@ function ledgerKey(name, type) {
 // ---- Feature gate -----------------------------------------------------------
 
 /**
- * Returns true when state ledger extraction is active for the current profile.
- *
- * Profile B: on by default (state_ledger_enabled must be true).
- * Profile A: requires both state_ledger_enabled and state_ledger_profile_a_override.
+ * Returns true when state ledger extraction is active.
  *
  * @returns {boolean}
  */
 export function isStateLedgerEnabled() {
   const s = extension_settings[MODULE_NAME];
   if (!s) return false;
-  return !!(s.state_ledger_enabled && (s.profile === 'B' || s.state_ledger_profile_a_override));
+  return !!s.state_ledger_enabled;
 }
 
 // ---- Storage ----------------------------------------------------------------

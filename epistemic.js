@@ -61,18 +61,14 @@ import { MACRO_NAMES, setMacroContent, isMacroActive } from './macros.js';
 // ---- Feature gate -----------------------------------------------------------
 
 /**
- * Returns true when the Perspectives & Secrets feature is active for the
- * current hardware profile and user settings.
- *
- * Profile B: on by default (epistemic_enabled must be true).
- * Profile A: requires both epistemic_enabled and epistemic_profile_a_override.
+ * Returns true when the Perspectives & Secrets feature is active.
  *
  * @returns {boolean}
  */
 export function isEpistemicEnabled() {
   const s = extension_settings[MODULE_NAME];
   if (!s) return false;
-  return !!(s.epistemic_enabled && (s.profile === 'B' || s.epistemic_profile_a_override));
+  return !!s.epistemic_enabled;
 }
 
 // ---- Storage ----------------------------------------------------------------

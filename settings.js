@@ -245,7 +245,6 @@ export const defaultSettings = {
 
   // Perspectives & Secrets (epistemic tracking)
   epistemic_enabled: true,
-  epistemic_profile_a_override: false,
   epistemic_inject_unaware: true,
   epistemic_secondhand_framing: true,
   epistemic_response_length: 400,
@@ -256,7 +255,6 @@ export const defaultSettings = {
 
   // State Ledger (structured entity state cards)
   state_ledger_enabled: false,
-  state_ledger_profile_a_override: false,
   state_ledger_inject_budget: 200,
   state_ledger_depth: 1,
   state_ledger_position: extension_prompt_types.IN_CHAT,
@@ -432,18 +430,6 @@ export function loadSettings() {
   ) {
     extension_settings[MODULE_NAME].consolidation_enabled =
       extension_settings[MODULE_NAME].longterm_consolidate;
-  }
-
-  // Profile A gating: epistemic and state ledger extraction require a
-  // reasoning-capable model. Disable on Profile A unless the user has
-  // explicitly opted in, so that importing someone else's settings cannot
-  // accidentally activate them.
-  const activeProfile = getHardwareProfile();
-  if (activeProfile === 'a' && !extension_settings[MODULE_NAME].epistemic_profile_a_override) {
-    extension_settings[MODULE_NAME].epistemic_enabled = false;
-  }
-  if (activeProfile === 'a' && !extension_settings[MODULE_NAME].state_ledger_profile_a_override) {
-    extension_settings[MODULE_NAME].state_ledger_enabled = false;
   }
 }
 
@@ -828,10 +814,6 @@ export function bindSettingsUI(ctrl) {
       $(this).toggleClass('sm-gated', !isB);
       $(this).find('input, select, button').prop('disabled', !isB);
     });
-    // Show Profile A notices when the active profile is A, so the user
-    // understands why those toggles are off.
-    $('#sm_epistemic_profile_a_notice').toggle(!isB);
-    $('#sm_state_ledger_profile_a_notice').toggle(!isB);
   }
 
   $('#sm_hardware_profile')
@@ -1384,17 +1366,19 @@ export function bindSettingsUI(ctrl) {
 
   $('#sm_epistemic_enabled')
     .prop('checked', s.epistemic_enabled ?? true)
-    .on('change', function () {
-      extension_settings[MODULE_NAME].epistemic_enabled = $(this).prop('checked');
-      saveSettingsDebounced();
-      const characterName = ctrl.getSelectedCharacterName();
-      injectEpistemicKnowledge(characterName, characterName);
-    });
-
-  $('#sm_epistemic_profile_a_override')
-    .prop('checked', s.epistemic_profile_a_override ?? false)
-    .on('change', function () {
-      extension_settings[MODULE_NAME].epistemic_profile_a_override = $(this).prop('checked');
+    .on('change', async function () {
+      const enabling = $(this).prop('checked');
+      if (enabling && getHardwareProfile() === 'a') {
+        const confirmed = await callGenericPopup(
+          'Perspectives & Secrets works best with a cloud-based LLM or a strong reasoning-capable local model (e.g. Gemma 4, Qwen3).\n\nWeaker models may produce low-quality extractions. Use the model test in the Configuration section to check whether your model is up to the task.\n\nEnable anyway?',
+          POPUP_TYPE.CONFIRM,
+        );
+        if (!confirmed) {
+          $(this).prop('checked', false);
+          return;
+        }
+      }
+      extension_settings[MODULE_NAME].epistemic_enabled = enabling;
       saveSettingsDebounced();
       const characterName = ctrl.getSelectedCharacterName();
       injectEpistemicKnowledge(characterName, characterName);
@@ -1451,16 +1435,19 @@ export function bindSettingsUI(ctrl) {
 
   $('#sm_state_ledger_enabled')
     .prop('checked', s.state_ledger_enabled ?? false)
-    .on('change', function () {
-      extension_settings[MODULE_NAME].state_ledger_enabled = $(this).prop('checked');
-      saveSettingsDebounced();
-      injectStateLedger();
-    });
-
-  $('#sm_state_ledger_profile_a_override')
-    .prop('checked', s.state_ledger_profile_a_override ?? false)
-    .on('change', function () {
-      extension_settings[MODULE_NAME].state_ledger_profile_a_override = $(this).prop('checked');
+    .on('change', async function () {
+      const enabling = $(this).prop('checked');
+      if (enabling && getHardwareProfile() === 'a') {
+        const confirmed = await callGenericPopup(
+          'State Ledger works best with a cloud-based LLM or a strong reasoning-capable local model (e.g. Gemma 4, Qwen3).\n\nWeaker models may pad unknown fields with placeholder values rather than omitting them, producing noisy output. Use the model test in the Configuration section to check whether your model is up to the task.\n\nEnable anyway?',
+          POPUP_TYPE.CONFIRM,
+        );
+        if (!confirmed) {
+          $(this).prop('checked', false);
+          return;
+        }
+      }
+      extension_settings[MODULE_NAME].state_ledger_enabled = enabling;
       saveSettingsDebounced();
       injectStateLedger();
     });
