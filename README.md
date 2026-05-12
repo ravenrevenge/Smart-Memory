@@ -209,17 +209,17 @@ If you are on limited VRAM (8GB or less), keep the Message Limit extension enabl
 
 ### Recommended local models
 
-These models have been tested against Smart Memory's extraction prompts. They are listed in order of recommendation - each step down trades quality or precision for a smaller footprint or faster extraction.
+These models have been tested against Smart Memory's extraction prompts and are listed in order of recommendation - each step down trades quality or precision for a smaller footprint or faster extraction. Reference hardware for testing is an RTX 2080 (8 GB VRAM). Models requiring more VRAM than that are noted as community reports.
 
 [**`huihui_ai/gemma4-abliterated:e4b-it`**](https://ollama.com/huihui_ai/gemma4-abliterated) - primary recommendation. Passes all extraction tests cleanly. Produces sharp, precise character facts, well-formed arc descriptions, and accurate session details. Does not over-extract - what it finds is genuinely there. The abliterated variant handles explicit roleplay content without refusals. The trade-off is speed: Gemma 4 is a reasoning model and thinks before each extraction pass, so it takes longer per message than Qwen. If output quality matters more than extraction speed, this is the model to use. See [Reasoning models](#reasoning-models) below for setup notes.
 
-[**`huihui_ai/qwen3-vl-abliterated:30b`**](https://ollama.com/huihui_ai/qwen3-vl-abliterated) (20 GB) - high coverage. Understands complex emotional undercurrents and relationship dynamics. Extracts more items per pass than Gemma 4 - useful if you prefer broader coverage over precision. Requires substantial VRAM - only suitable if you have 24 GB or more available.
+[**`huihui_ai/qwen3-vl-abliterated:30b`**](https://ollama.com/huihui_ai/qwen3-vl-abliterated) (20 GB, 24 GB+ recommended) - high coverage. Understands complex emotional undercurrents and relationship dynamics. Extracts more items per pass than Gemma 4 - useful if you prefer broader coverage over precision. _Community report - not tested on reference hardware._
 
 [**`huihui_ai/qwen3-vl-abliterated:8b-instruct`**](https://ollama.com/huihui_ai/qwen3-vl-abliterated) (6.1 GB) - good balance of quality and speed. Produces accurate character facts and reliably identifies open narrative threads without the reasoning overhead of Gemma 4. Can over-extract on arcs and session memory - tends to file more items than strictly necessary. The abliterated variant handles explicit roleplay content without refusals.
 
-[**`mistral:7b`**](https://ollama.com/library/mistral) (4.1 GB) - solid fallback when VRAM is tight. Extraction quality is lower across all tiers - character details are sometimes less precise, session memory undercounts on shorter exchanges, and arc descriptions tend to be vaguer. Still functional and worth using if the 2 GB saving over Qwen matters to you.
+[**`mistral:7b`**](https://ollama.com/library/mistral) (4.1 GB) - quality fallback for 6 GB cards or tighter budgets on 8 GB. Extraction quality is lower across all tiers - character details are sometimes less precise, session memory undercounts on shorter exchanges, and arc descriptions tend to be vaguer. Still functional and worth using if the 2 GB saving over Qwen matters to you.
 
-[**`gemma3:4b`**](https://ollama.com/library/gemma3) (3.3 GB) - lightest option, but the quality gap is meaningful. On shorter exchanges it can misread character traits, occasionally produces duplicate entries in a single pass, and is more prone to extracting from prompt examples rather than conversation content on complex prompts. Use it only if 4 GB is a hard limit and you accept that memory quality will be noticeably lower than the models above.
+[**`gemma3:4b`**](https://ollama.com/library/gemma3) (3.3 GB) - minimum viable option. The quality gap is meaningful: on shorter exchanges it can misread character traits, occasionally produces duplicate entries in a single pass, and is more prone to extracting from prompt examples rather than conversation content on complex prompts. Use it only if 4 GB is a hard limit and you accept that memory quality will be noticeably lower than the models above.
 
 Smart Memory's prompts are longer than typical chat prompts - a model that works fine for roleplay may still struggle with extraction if the combined prompt length exceeds its effective context window. If you get empty or garbled extraction output with a different model, context overflow is the most likely cause. Use the **Test Extraction Model** button to check any model before committing to it.
 
@@ -240,13 +240,13 @@ The trade-off specific to Gemma 4 is speed: the thinking block adds time before 
 
 ### Testing your model
 
-The **Test Extraction Model** button (in the **Configuration** section, below the hardware profile) runs a fixed 30-message roleplay scenario through all enabled extraction tiers using the model you currently have configured. This lets you verify a new model before committing to it, without waiting for a real roleplay to produce extraction output.
+The **Test Extraction Model** button (in the **Configuration** section, below the hardware profile) runs a fixed 30-message roleplay scenario through all extraction tiers using the model you currently have configured - including tiers you have not yet enabled. This lets you verify a new model before committing to it, without waiting for a real roleplay to produce extraction output.
 
 The test is safe to run mid-roleplay - it uses its own private scenario and never writes anything to your session, chat history, or stored memories.
 
 **What the test does:**
 
-- Sends the same scenario through each enabled tier (long-term memories, session memories, story arcs) in sequence
+- Sends the same scenario through all tiers (long-term memories, session memories, story arcs, Perspectives & Secrets, State Ledger) in sequence
 - Displays results one tier at a time with **Previous** and **Next** buttons to step through them
 - Each tier shows the model's raw output in a text area so you can judge the quality yourself, alongside a hint describing what a capable model should produce
 - If any tier returns empty output the test stops immediately and reports which tier failed - a model that produces nothing on a rich scenario is not suitable for Smart Memory

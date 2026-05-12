@@ -33,6 +33,7 @@ import {
   setExtensionPrompt,
   saveSettingsDebounced,
   getMaxContextSize,
+  stopGeneration,
 } from '../../../../script.js';
 import { callGenericPopup, POPUP_TYPE } from '../../../../scripts/popup.js';
 import { getContext, extension_settings } from '../../../extensions.js';
@@ -88,6 +89,9 @@ import {
 } from './scenes.js';
 import { extractArcs, injectArcs, clearArcs, clearArcSummaries, loadArcSummaries } from './arcs.js';
 import { runModelTest, TEST_MESSAGES, TEST_CHARACTERS } from './model-test.js';
+
+/** Set to true while a model test is running to allow cancellation. */
+let modelTestRunning = false;
 import { checkContinuity, generateRepair, injectRepair } from './continuity.js';
 import { getHardwareProfile, getEmbeddingBatch, clearEmbeddingFailed } from './embeddings.js';
 import { clearCanon, generateCanon, injectCanon, saveCanon } from './canon.js';
@@ -834,7 +838,15 @@ export function bindSettingsUI(ctrl) {
     const $btn = $(this);
     const $result = $('#sm_model_test_result');
 
-    $btn.prop('disabled', true);
+    // If a test is already running, cancel it.
+    if (modelTestRunning) {
+      modelTestRunning = false;
+      stopGeneration();
+      return;
+    }
+
+    modelTestRunning = true;
+    $btn.html('<i class="fa-solid fa-circle-stop"></i> <span>Stop Testing</span>');
     $result
       .show()
       .html(
@@ -843,13 +855,28 @@ export function bindSettingsUI(ctrl) {
 
     let outcome;
     try {
-      outcome = await runModelTest();
+      outcome = await runModelTest(() => !modelTestRunning);
     } catch (err) {
       console.error('[SmartMemory] Model test failed:', err);
       $result.html(
         '<div class="sm_model_test_fail"><i class="fa-solid fa-circle-xmark"></i> Test failed with an error. Check the browser console for details.</div>',
       );
-      $btn.prop('disabled', false);
+      modelTestRunning = false;
+      $btn.html(
+        '<i class="fa-solid fa-flask"></i> <span>Test Extraction Model <span class="sm-info" data-tooltip="Runs a fixed test scenario through all extraction tiers. Use this to check whether your configured model is suitable for Smart Memory before committing to a session.">ⓘ</span></span>',
+      );
+      return;
+    }
+
+    modelTestRunning = false;
+    $btn.html(
+      '<i class="fa-solid fa-flask"></i> <span>Test Extraction Model <span class="sm-info" data-tooltip="Runs a fixed test scenario through all extraction tiers. Use this to check whether your configured model is suitable for Smart Memory before committing to a session.">ⓘ</span></span>',
+    );
+
+    if (outcome.cancelled) {
+      $result.html(
+        '<div class="sm_model_test_running"><i class="fa-solid fa-circle-xmark"></i> Test cancelled.</div>',
+      );
       return;
     }
 
@@ -857,7 +884,6 @@ export function bindSettingsUI(ctrl) {
       $result.html(
         `<div class="sm_model_test_fail"><i class="fa-solid fa-circle-xmark"></i> <strong>${outcome.failedTier}</strong> returned no output. Your model may not be suitable for Smart Memory, or may need a stronger prompt style. Consider trying a different model.</div>`,
       );
-      $btn.prop('disabled', false);
       return;
     }
 
@@ -906,7 +932,6 @@ export function bindSettingsUI(ctrl) {
     }
 
     renderTier();
-    $btn.prop('disabled', false);
   });
 
   $('#sm_extraction_frequency')
@@ -1370,7 +1395,7 @@ export function bindSettingsUI(ctrl) {
       const enabling = $(this).prop('checked');
       if (enabling && getHardwareProfile() === 'a') {
         const confirmed = await callGenericPopup(
-          'Perspectives & Secrets works best with a cloud-based LLM or a strong reasoning-capable local model (e.g. Gemma 4, Qwen3).\n\nWeaker models may produce low-quality extractions. Use the model test in the Configuration section to check whether your model is up to the task.',
+          'Perspectives & Secrets works best with a cloud-based LLM or a strong capable local model (e.g. Gemma 4).\n\nWeaker models may produce low-quality extractions. Use the model test in the Configuration section to check whether your model is up to the task.',
           POPUP_TYPE.CONFIRM,
           '',
           { okButton: 'I understand', cancelButton: 'Cancel' },
@@ -1441,7 +1466,7 @@ export function bindSettingsUI(ctrl) {
       const enabling = $(this).prop('checked');
       if (enabling && getHardwareProfile() === 'a') {
         const confirmed = await callGenericPopup(
-          'State Ledger works best with a cloud-based LLM or a strong reasoning-capable local model (e.g. Gemma 4, Qwen3).\n\nWeaker models may pad unknown fields with placeholder values rather than omitting them, producing noisy output. Use the model test in the Configuration section to check whether your model is up to the task.',
+          'State Ledger works best with a cloud-based LLM or a strong capable local model (e.g. Gemma 4).\n\nWeaker models may pad unknown fields with placeholder values rather than omitting them, producing noisy output. Use the model test in the Configuration section to check whether your model is up to the task.',
           POPUP_TYPE.CONFIRM,
           '',
           { okButton: 'I understand', cancelButton: 'Cancel' },

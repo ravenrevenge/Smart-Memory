@@ -21,8 +21,8 @@
  * Extraction model test: runs a fixed scenario through the full extraction
  * pipeline and returns structured per-tier results for display in the UI.
  *
- * runModelTest               - runs the test against the configured memory LLM and
- *                              returns per-tier results plus the first failed tier
+ * runModelTest               - runs the test against the configured memory LLM;
+ *                              accepts an optional isCancelled callback to abort between tiers
  * TEST_CHARACTERS            - characters in the main Yara/Cael scenario
  * TEST_MESSAGES              - messages for the main scenario
  * EPISTEMIC_TEST_CHARACTERS  - characters in the Mira/Sera/Ryn/Dael epistemic scenario
@@ -31,8 +31,6 @@
  * STATE_TEST_MESSAGES        - messages for the state ledger scenario
  */
 
-import { extension_settings } from '../../../extensions.js';
-import { MODULE_NAME } from './constants.js';
 import { generateMemoryExtract } from './generate.js';
 import { smLog } from './logging.js';
 import {
@@ -49,8 +47,6 @@ import {
   parseEpistemicResponse,
   parseStateCardResponse,
 } from './parsers.js';
-import { isEpistemicEnabled } from './epistemic.js';
-import { isStateLedgerEnabled } from './state-ledger.js';
 
 // ---- Test fixture -----------------------------------------------------------
 
@@ -408,29 +404,25 @@ const TIER_DEFS = [
 // ---- Runner -----------------------------------------------------------------
 
 /**
- * Runs the fixed test scenario through every enabled extraction tier.
+ * Runs the fixed test scenario through all extraction tiers regardless of
+ * whether each tier is currently enabled. This allows users to evaluate
+ * model capability before deciding to enable a tier.
  * Returns per-tier results and the name of the first tier that produced
- * no output (null if all tiers passed).
+ * no output (null if all tiers passed), or { cancelled: true } if the
+ * caller requested cancellation between tiers.
  *
  * Tiers are run sequentially to avoid OOM on local models.
  *
- * @returns {Promise<{tiers: Array, failedTier: string|null}>}
+ * @param {() => boolean} [isCancelled] - optional callback; return true to abort before the next tier
+ * @returns {Promise<{tiers: Array, failedTier: string|null, cancelled?: boolean}>}
  */
-export async function runModelTest() {
-  const settings = extension_settings[MODULE_NAME];
+export async function runModelTest(isCancelled = () => false) {
   const chatHistory = TEST_MESSAGES.map((m) => `${m.name}: ${m.text}`).join('\n\n');
 
   const tiers = [];
 
   for (const def of TIER_DEFS) {
-    // Epistemic and State Ledger tiers use their own enable gate functions rather
-    // than a plain settings key, because they also factor in the hardware profile.
-    if (def.enabledKey === null) {
-      if (def.key === 'epistemic' && !isEpistemicEnabled()) continue;
-      if (def.key === 'state_ledger' && !isStateLedgerEnabled()) continue;
-    } else if (!(settings[def.enabledKey] ?? true)) {
-      continue;
-    }
+    if (isCancelled()) return { tiers, failedTier: null, cancelled: true };
 
     // Epistemic and State Ledger tiers use their own test scenarios.
     // All other tiers use the shared chat history.
