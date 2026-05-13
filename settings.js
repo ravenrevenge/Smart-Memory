@@ -494,7 +494,6 @@ export function autoTuneBudgets(characterName) {
   if (!s.auto_tune_budgets) return;
 
   const snap = (v) => Math.max(AUTO_TUNE_FLOOR, Math.round(v / 50) * 50);
-  const totalCap = totalBudgetFromSettings(s);
 
   // Compute target budget for each tier from its actual demand.
   // Tiers with no recorded stats (disabled or never injected) keep their
@@ -502,42 +501,25 @@ export function autoTuneBudgets(characterName) {
   const targets = TUNABLE_TIERS.map((tier) => {
     const stats = getTierTrimStats(tier.promptKey);
     if (!stats || stats.full === 0) {
-      return { tier, budget: s[tier.setting], minimum: AUTO_TUNE_FLOOR };
+      return { tier, budget: s[tier.setting] };
     }
-    // Minimum is actual demand - headroom is a want, not a need.
-    return { tier, budget: snap(stats.full * AUTO_TUNE_HEADROOM), minimum: stats.full };
+    return { tier, budget: snap(stats.full * AUTO_TUNE_HEADROOM) };
   });
 
-  const totalTarget = targets.reduce((sum, t) => sum + t.budget, 0);
-
-  if (totalTarget > totalCap) {
-    // Over the cap: cut headroom first before cutting actual demand.
-    // Give each tier its minimum (actual demand), then distribute any
-    // remaining cap as extra headroom proportionally.
-    const totalMinimum = targets.reduce((sum, t) => sum + t.minimum, 0);
-    if (totalMinimum <= totalCap) {
-      // Enough room to cover all actual demand - prorate the surplus headroom.
-      const surplus = totalCap - totalMinimum;
-      const totalHeadroom = targets.reduce((sum, t) => sum + Math.max(0, t.budget - t.minimum), 0);
-      const headroomScale = totalHeadroom > 0 ? surplus / totalHeadroom : 0;
+  // In simple mode the user has set an explicit total budget cap; honour it by
+  // scaling targets down if they exceed it. In advanced mode each tier slider
+  // is independent and there is no user-set total, so auto-tune sets each tier
+  // to exactly what it needs without a cap constraint.
+  if ((s.settings_mode ?? 'simple') === 'simple') {
+    const totalCap = totalBudgetFromSettings(s);
+    const totalTarget = targets.reduce((sum, t) => sum + t.budget, 0);
+    if (totalTarget > totalCap) {
+      const scale = totalCap / totalTarget;
       for (const t of targets) {
-        const headroom = Math.max(0, t.budget - t.minimum);
-        // Round up to ensure we never snap below the tier's actual demand.
-        t.budget = Math.max(snap(t.minimum), snap(t.minimum + headroom * headroomScale));
-      }
-    } else {
-      // Even bare minimums exceed the cap - scale everything down proportionally.
-      // Round up rather than to nearest so we never go below the proportional share.
-      const snapUp = (v) => Math.max(AUTO_TUNE_FLOOR, Math.ceil(v / 50) * 50);
-      const scale = totalCap / totalMinimum;
-      for (const t of targets) {
-        t.budget = snapUp(t.minimum * scale);
+        t.budget = Math.max(snap(t.minimum ?? AUTO_TUNE_FLOOR), snap(t.budget * scale));
       }
     }
   }
-  // Under the cap: targets already sum to less than totalCap - no surplus
-  // redistribution needed. Unused budget just means less total injection,
-  // which is correct when tiers have little to say.
 
   // Apply any changes and update DOM sliders.
   let changed = false;
