@@ -1480,7 +1480,7 @@ export function bindSettingsUI(ctrl) {
       const enabling = $(this).prop('checked');
       if (enabling && getHardwareProfile() === 'a') {
         const confirmed = await callGenericPopup(
-          'State Ledger works best with a cloud-based LLM or a strong capable local model (e.g. Gemma 4).\n\nWeaker models may pad unknown fields with placeholder values rather than omitting them, producing noisy output. Use the model test in the Configuration section to check whether your model is up to the task.',
+          'State Ledger works best with a cloud-based LLM or a strong capable local model (e.g. Gemma 4).\n\nWeaker models may invent field values that are not in the scene, producing inaccurate entity state. Use the model test in the Configuration section to check whether your model is up to the task.',
           POPUP_TYPE.CONFIRM,
           '',
           { okButton: 'I understand', cancelButton: 'Cancel' },
