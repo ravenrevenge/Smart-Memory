@@ -302,7 +302,7 @@ export function updateTokenDisplay() {
   // prompting them to check the token bar. Subsequent calls are silent.
   if (hasAnyTrimmedTier() && !hasTrimToastFired()) {
     markTrimToastFired();
-    toastr.info(
+    toastr.warning(
       'One or more memory tiers are trimming content to stay within budget. Check the token bar in Smart Memory settings.',
       'Smart Memory',
       { timeOut: 8000, extendedTimeOut: 4000, closeButton: true },
