@@ -1788,11 +1788,15 @@ export function updateEpistemicUI(characterName) {
   // Always render the spoiler block so the user knows it exists and can tell
   // whether any believes/hiding entries were extracted.
   const $details = $('<details class="sm_epistemic_spoiler">');
-  const $summary = $(
-    '<summary class="sm_epistemic_spoiler_summary"><i class="fa-solid fa-lock"></i> Spoiler - false beliefs and hidden secrets <em>(click to reveal)</em></summary>',
-  );
+  const $summary = $(`
+    <summary class="sm_epistemic_spoiler_summary">
+      <span class="sm_spoiler_closed"><i class="fa-solid fa-lock"></i> Spoiler - false beliefs and hidden secrets <em>(click to reveal)</em></span>
+      <span class="sm_spoiler_open"><i class="fa-solid fa-lock-open"></i> False beliefs and hidden secrets <em>(click to hide)</em></span>
+    </summary>
+  `);
 
   // Intercept the open action to warn before revealing spoiler content.
+  // Closing needs no confirmation - the user has already seen the content.
   $summary.on('click', (e) => {
     if (!$details.prop('open')) {
       e.preventDefault();
