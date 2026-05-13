@@ -33,6 +33,10 @@
  * formatSummary             - strips model analysis scaffolding and extracts the summary text
  * detectSceneBreakHeuristic - pattern-based scene break check, no model call required
  * parseProfileOutput        - extracts character_state, world_state, and relationship_matrix from profile generation output
+ * parseTriggerResponse           - parses the comma-separated keyword list from a trigger generation response
+ * parseRelationshipDeltaResponse - parses per-pair relationship state changes with magnitude from a delta response
+ * parseEpistemicResponse         - parses the five-tag knowledge map output from an epistemic extraction pass
+ * parseStateCardResponse         - parses structured current-state field output into a Map of key -> fields
  *
  * All new memory objects produced by the parse functions carry the full graph
  * field set (id, source_messages, entities, time_scope, valid_from, valid_to,
@@ -217,7 +221,10 @@ export function parseArcOutput(text, existingArcs) {
   let match;
   while ((match = addPattern.exec(text)) !== null) {
     const content = match[1].trim();
-    if (content.length > 5) toAdd.push({ content, ts: Date.now() });
+    // Require a minimum length to filter obvious noise; rely on the prompt
+    // to distinguish arcs from facts rather than vocabulary-based signals,
+    // which reject valid arcs from models that phrase threads as noun phrases.
+    if (content.length > 15) toAdd.push({ content, ts: Date.now() });
   }
 
   while ((match = resolvedPattern.exec(text)) !== null) {
@@ -387,6 +394,161 @@ export function parseProfileOutput(response) {
   };
 }
 
+// ---- Trigger keyword parser ---------------------------------------------
+
+/**
+ * Parses the comma-separated keyword list returned by buildTriggerGenerationPrompt.
+ *
+ * Filters out any token that is already a word in the memory content - the
+ * model sometimes repeats content words despite the instruction. Also drops
+ * tokens that are too short, too long, or contain no alphabetic characters.
+ * Caps output at 6 entries in case the model over-generates.
+ *
+ * @param {string} response - Raw model response to the trigger generation prompt.
+ * @param {string} memoryContent - The memory content the triggers are for.
+ * @returns {string[]} Filtered, lowercased trigger tokens.
+ */
+export function parseTriggerResponse(response, memoryContent) {
+  const contentWords = new Set(
+    String(memoryContent || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length >= 3),
+  );
+  return String(response || '')
+    .split(/[,\n]/)
+    .flatMap((t) =>
+      t
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, '')
+        .trim()
+        .split(/\s+/),
+    )
+    .filter((t) => t.length >= 3 && t.length <= 40 && /[a-z]/.test(t) && !contentWords.has(t))
+    .slice(0, 6);
+}
+
+// ---- Relationship delta parser ------------------------------------------
+
+// Matches lines like "Senjin -> Asher: warm(high), cautious(low)"
+// The arrow can be -> or the unicode → character.
+const RELATIONSHIP_LINE_RE = /^([^→-]+?)\s*(?:->|→)\s*([^:]+?)\s*:\s*(.+)$/;
+// Matches the inline magnitude suffix: word(low|medium|high)
+const INLINE_MAGNITUDE_RE = /\((\s*low|medium|high\s*)\)/i;
+const MAGNITUDE_KEYWORDS = new Set(['low', 'medium', 'high']);
+// Numeric order for magnitude comparison - used to resolve duplicate root words.
+const MAGNITUDE_ORDER = { low: 0, medium: 1, high: 2 };
+// Transitional phrases the model sometimes uses to describe change - strip them.
+const TRANSITION_RE =
+  /\b(?:then\s+(?:more\s+)?|increasingly\s+|still\s+|even\s+more\s+|becoming\s+(?:more\s+)?)/gi;
+// Hedge words that should be stripped from descriptor words. Downgrading hedges
+// ("slightly", "somewhat") force magnitude to low; upgrading hedges ("very",
+// "deeply") force magnitude to high. The magnitude override only applies when
+// no explicit inline magnitude was present in the token.
+const DOWNGRADE_HEDGE_RE = /^(?:slightly|somewhat|a\s+bit|a\s+little|mildly)\s+/i;
+const UPGRADE_HEDGE_RE = /^(?:very|extremely|deeply|intensely|profoundly)\s+/i;
+
+/**
+ * Parses the model's relationship delta response into an array of update objects.
+ *
+ * Each output object has the shape:
+ *   { subject: string, target: string, updates: Array<{word, magnitude}>, removals: string[] }
+ *
+ * updates  - descriptors to add or update (with per-word magnitudes)
+ * removals - descriptor words prefixed with ! that should be removed from the stored state
+ *
+ * Lines that do not match the expected format are silently skipped.
+ * Output NONE from the model produces an empty array.
+ *
+ * @param {string} response - Raw model output from buildRelationshipDeltaPrompt.
+ * @returns {Array<{subject: string, target: string, updates: Array<{word: string, magnitude: string}>, removals: string[]}>}
+ */
+export function parseRelationshipDeltaResponse(response) {
+  const lines = String(response || '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l && l.toUpperCase() !== 'NONE');
+
+  const results = [];
+  for (const line of lines) {
+    const match = RELATIONSHIP_LINE_RE.exec(line);
+    if (!match) continue;
+
+    const subject = match[1].trim();
+    const target = match[2].trim();
+    const rest = match[3].trim();
+
+    const updates = [];
+    const removals = [];
+
+    for (const token of rest.split(',')) {
+      const raw = token.trim();
+      if (!raw) continue;
+
+      // Removal marker: !descriptor
+      if (raw.startsWith('!')) {
+        const word = raw
+          .slice(1)
+          .replace(INLINE_MAGNITUDE_RE, '')
+          .replace(TRANSITION_RE, '')
+          .replace(/[^a-z\s-]/g, '')
+          .trim()
+          .toLowerCase();
+        if (word) removals.push(word);
+        continue;
+      }
+
+      // Parse inline magnitude: word(medium) or word (medium)
+      const magMatch = INLINE_MAGNITUDE_RE.exec(raw);
+      let magnitude = magMatch ? magMatch[1].trim().toLowerCase() : 'medium';
+      let word = raw
+        .replace(INLINE_MAGNITUDE_RE, '')
+        .replace(TRANSITION_RE, '')
+        .replace(/[^a-z\s-]/g, '')
+        .trim()
+        .toLowerCase();
+
+      // Strip hedge words and adjust magnitude when no explicit magnitude was given.
+      // "slightly nervous" → nervous(low); "very nervous" → nervous(high).
+      if (!magMatch) {
+        if (DOWNGRADE_HEDGE_RE.test(word)) {
+          word = word.replace(DOWNGRADE_HEDGE_RE, '').trim();
+          magnitude = 'low';
+        } else if (UPGRADE_HEDGE_RE.test(word)) {
+          word = word.replace(UPGRADE_HEDGE_RE, '').trim();
+          magnitude = 'high';
+        }
+      } else {
+        // Even with an explicit magnitude, strip the hedge from the word itself.
+        word = word.replace(DOWNGRADE_HEDGE_RE, '').replace(UPGRADE_HEDGE_RE, '').trim();
+      }
+
+      if (word && !MAGNITUDE_KEYWORDS.has(word)) {
+        updates.push({ word, magnitude });
+      }
+    }
+
+    // Deduplicate updates by root word: hedge normalization can produce the same
+    // word twice with different magnitudes (e.g. "slightly nervous(medium)" and
+    // "nervous(medium)" both survive the token loop). Keep only the highest magnitude.
+    const deduped = new Map();
+    for (const { word, magnitude } of updates) {
+      const existing = deduped.get(word);
+      if (!existing || MAGNITUDE_ORDER[magnitude] > MAGNITUDE_ORDER[existing.magnitude]) {
+        deduped.set(word, { word, magnitude });
+      }
+    }
+    const dedupedUpdates = [...deduped.values()];
+
+    if (subject && target && (dedupedUpdates.length > 0 || removals.length > 0)) {
+      results.push({ subject, target, updates: dedupedUpdates, removals });
+    }
+  }
+  return results;
+}
+
 // ---- Scene break heuristics ---------------------------------------------
 
 // Patterns that reliably signal a scene transition in roleplay prose.
@@ -400,18 +562,25 @@ const SCENE_BREAK_PATTERNS = [
   // Time skips - absolute jumps ("a year passed", "three months went by")
   /\b(a (year|month|week|decade)|several (years?|months?|weeks?|days?)|[a-z]+ (years?|months?|weeks?|days?) (passed|went by|had passed|had gone by))\b/i,
   // Location transitions - arriving at a named or distinct new place.
-  // Deliberately narrow: "entered the room" is not a scene break, but
-  // "arrived at the castle" or "found herself in a foreign city" is.
-  /\b(arrived at (the|a|an)\s+\w+|found (himself|herself|themselves|myself|yourself) (in|at) (a|an|the)\s+\w+|made (his|her|their|my|your) way (to|into) (the|a|an)\s+\w+|fled (to|into) (the|a|an)\s+\w+|escaped (to|into) (the|a|an)\s+\w+)\b/i,
+  // Allows one or two-word place names and possessives ("Asher's cabin").
+  // "entered the room" is still excluded - that is not a scene break.
+  /\b(arrived at (the|a|an|\w+'s)\s+\w+(\s+\w+)?|found (himself|herself|themselves|myself|yourself) (in|at) (a|an|the)\s+\w+(\s+\w+)?|made (his|her|their|my|your) way (to|into) (the|a|an|\w+'s)\s+\w+(\s+\w+)?|fled (to|into) (the|a|an)\s+\w+(\s+\w+)?|escaped (to|into) (the|a|an)\s+\w+(\s+\w+)?)\b/i,
+  // Location transitions - purposeful travel to a new place.
+  // "headed to the door" is a false positive risk but acceptable - in RP
+  // context a door is rarely a destination, and the alternative is missing
+  // every cabin/barn/hall transition.
+  /\b((headed|led (him|her|them|us)|walked|wandered) (over )?(to|into|toward) (the|a|an|\w+'s)\s+\w+(\s+\w+)?)\b/i,
   // Location transitions - establishing a new base or camp.
   /\b(settled (in|into|down in)|made (a|his|her|their|my) (home|camp|base) (in|at)|took (shelter|refuge) (in|at|among))\b/i,
   // Dawn/dusk transitions implying time passage through sleep or rest.
   /\b(as (dawn|morning|daylight|the sun) (broke|crept|arrived|filtered through|rose|spread)|when (dawn|morning) (came|broke|arrived))\b/i,
   /\b(as (night|darkness|dusk|evening) (fell|settled|crept|arrived|descended)|when (night|darkness|dusk) (came|fell|settled))\b/i,
-  // Sleep/wake transitions - only fire when waking implies overnight passage
-  // (dawn/morning/light/sun variants). "Woke from sleep" and "woke to find"
-  // are too broad and fire on brief naps mid-scene.
-  /\b((woke|stirred|roused) (as (dawn|morning|light)|with the (sun|light|dawn)))\b/i,
+  // Sleep transitions - falling asleep signals the end of a scene.
+  /\b(dozed? off|fell asleep|drifted off( to sleep)?|fell into (a |an? )?(deep )?(sleep|slumber))\b/i,
+  // Wake transitions - waking up after sleep, with or without dawn markers.
+  // The previous pattern required dawn/morning/light which missed natural
+  // "they woke up" transitions common in RP.
+  /\b((woke|stirred|roused) (up\b|(as |to find\b|beside\b|from (a |his |her |their )?(sleep|slumber|nap|rest))|(as (dawn|morning|light)|with the (sun|light|dawn))))\b/i,
   // Explicit separator markers (---, ***, * * *)
   /^[-*~]{3,}$/m,
   /\*\s*\*\s*\*/,
@@ -425,4 +594,138 @@ const SCENE_BREAK_PATTERNS = [
  */
 export function detectSceneBreakHeuristic(messageText) {
   return SCENE_BREAK_PATTERNS.some((pattern) => pattern.test(messageText));
+}
+
+// ---- Epistemic extraction parser ----------------------------------------
+
+// Matches: [hiding] Concealer from Target | content
+const EPISTEMIC_HIDING_RE = /^\[hiding\]\s+(.+?)\s+from\s+(.+?)\s*\|\s*(.+)$/i;
+// Matches: [tag] Subject | content  (for knows/unaware/suspects/believes)
+const EPISTEMIC_STANDARD_RE = /^\[(\w+)\]\s+(.+?)\s*\|\s*(.+)$/i;
+const EPISTEMIC_VALID_TYPES = new Set(['knows', 'unaware', 'suspects', 'believes', 'hiding']);
+
+/**
+ * Parses the output of an epistemic extraction prompt into structured entries.
+ *
+ * Handles two line shapes:
+ * - Standard: `[tag] Character | content`
+ * - Hiding:   `[hiding] Concealer from Target | content`
+ *
+ * Lines that do not match either pattern, start with '#' or '-' (model notes),
+ * or carry an unrecognised tag are silently skipped. Output 'NONE' returns an
+ * empty array.
+ *
+ * @param {string} text - Raw model output.
+ * @returns {Array<{type: string, subject: string, target: string|null, content: string}>}
+ */
+export function parseEpistemicResponse(text) {
+  if (!text || text.trim().toUpperCase() === 'NONE') return [];
+
+  const entries = [];
+
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#') || line.startsWith('-')) continue;
+
+    // Try hiding pattern first - it has a more specific structure.
+    let match = EPISTEMIC_HIDING_RE.exec(line);
+    if (match) {
+      entries.push({
+        type: 'hiding',
+        subject: match[1].trim(),
+        target: match[2].trim(),
+        content: match[3].trim(),
+      });
+      continue;
+    }
+
+    match = EPISTEMIC_STANDARD_RE.exec(line);
+    if (match) {
+      const type = match[1].toLowerCase();
+      if (!EPISTEMIC_VALID_TYPES.has(type)) continue;
+      entries.push({
+        type,
+        subject: match[2].trim(),
+        target: null,
+        content: match[3].trim(),
+      });
+    }
+  }
+
+  return entries;
+}
+
+// ---- State card parser ------------------------------------------------------
+
+/**
+ * Noise values that parsers must strip - placeholder strings Qwen emits instead
+ * of omitting unknown fields as instructed.
+ */
+const STATE_NOISE_VALUES = new Set([
+  'unknown',
+  'none',
+  'none mentioned',
+  'not mentioned',
+  'not specified',
+  'not applicable',
+  'n/a',
+  'na',
+  'unspecified',
+]);
+
+/**
+ * Parses the structured state card extraction output into a Map of ledger key
+ * to fields object.
+ *
+ * Expected input format (one entity per line):
+ *   [state:EntityName:type] field=value | field=value
+ *
+ * Noise values (unknown, none, none mentioned, etc.) are stripped per field.
+ * Entity entries where no fields survive filtering are dropped entirely.
+ *
+ * @param {string} raw - Raw model response text.
+ * @returns {Map<string, Object>} Map keyed by `name|type`, values are field objects.
+ */
+export function parseStateCardResponse(raw) {
+  const result = new Map();
+  if (!raw) return result;
+
+  // Match [state:EntityName:type] at the start of each line.
+  const lineRe = /\[state:([^\]]+):([^\]]+)\]\s*(.*)$/i;
+
+  for (const line of raw.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.toUpperCase() === 'NONE') continue;
+
+    const match = lineRe.exec(trimmed);
+    if (!match) continue;
+
+    const name = match[1].trim();
+    const type = match[2].trim().toLowerCase();
+    const rest = match[3].trim();
+
+    if (!name || !type || !rest) continue;
+
+    const fields = {};
+    for (const chunk of rest.split('|')) {
+      const eqIdx = chunk.indexOf('=');
+      if (eqIdx === -1) continue;
+      const fieldName = chunk.slice(0, eqIdx).trim().toLowerCase().replace(/\s+/g, '_');
+      const value = chunk.slice(eqIdx + 1).trim();
+      if (!fieldName || !value) continue;
+      // Strip noise values - do not store placeholders.
+      if (STATE_NOISE_VALUES.has(value.toLowerCase())) continue;
+      fields[fieldName] = value;
+    }
+
+    // Drop the entry if no valid fields survived filtering.
+    if (Object.keys(fields).length === 0) continue;
+
+    const key = `${name.toLowerCase().trim()}|${type}`;
+    // Merge with any earlier line for the same key (model may split across lines).
+    const existing = result.get(key) ?? {};
+    result.set(key, { ...existing, ...fields });
+  }
+
+  return result;
 }

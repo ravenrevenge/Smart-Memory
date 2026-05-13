@@ -5,6 +5,409 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-05-13
+
+### Fixed
+
+- **Thinking model tokens polluting extraction output**: models that emit
+  `<think>...</think>` reasoning blocks (Qwen3, DeepSeek R1, and others with
+  thinking enabled) had their reasoning content passed directly to the extraction
+  parsers, flooding memory tiers with raw chain-of-thought rather than extracted
+  content. All model responses are now stripped of thinking blocks before parsing.
+  Non-thinking models are unaffected.
+
+- **Thinking models producing empty summaries and recaps**: the same reasoning
+  block issue affected summarization and recap generation - the thinking block
+  consumed the entire generation budget before any actual output was written,
+  resulting in an empty summary or no recap appearing on return to a chat.
+  Thinking block stripping and a generous generation budget now apply to all
+  memory operations, not just extraction.
+
+- **Contextual triggers dropped during consolidation**: triggers generated for
+  long-term memories were silently discarded whenever consolidation ran. The
+  consolidation pass creates new memory objects from LLM-parsed output, and
+  only `ts` and `entities` were carried forward from the pre-consolidation
+  version - `triggers` was not. On the next extraction pass the trigger loop
+  skipped those memories entirely, making recovery impossible. Triggers are
+  now preserved through consolidation. Memories that already lost their
+  triggers will recover them automatically on the next extraction pass.
+
+- **Relationship history buttons misaligned on short rows**: edit and delete
+  buttons drifted left when a pair had few descriptors, producing an uneven
+  layout across the list. The content area now stretches to fill available
+  width so the buttons are always flush to the right edge of the row.
+
+- **Duplicate descriptors after hedge normalization**: when the model output both
+  a hedged and unhedged form of the same descriptor in the same extraction pass
+  (e.g. `slightly nervous(medium)` and `nervous(medium)`), both survived into
+  storage after normalization. A post-normalization dedup pass now runs per pair
+  and keeps only the highest-magnitude entry for each root word.
+
+- **`crypto.randomUUID` unavailable on HTTP**: memory ID generation failed with
+  `TypeError: crypto.randomUUID is not a function` when SillyTavern was accessed
+  over plain HTTP from a remote device. A manual UUID v4 fallback is now used
+  when `crypto.randomUUID` is not available.
+
+- **Relationship history magnitude parsing**: the extraction parser only
+  recognized a `magnitude=X` keyword syntax but the model outputs plain
+  magnitude words (`low`, `medium`, `high`) inline with the descriptor; a
+  bare-word fallback now detects magnitude terms directly so they are no longer
+  treated as part of the descriptor word.
+
+- **Relationship history scoping**: pairs whose neither party matched the
+  current character were incorrectly stored in that character's record. The
+  filter now uses bidirectional substring matching so name variants (e.g.
+  `Asher` vs `Asher Somel`) still pass the check, and unrelated pairs from
+  other participants are discarded.
+
+- **Transitional phrases in relationship descriptors**: phrases like `then more
+  trusting` or `becoming warmer` were stored as literal descriptor words. A
+  transition-phrase regex now strips these before storage so only the root
+  sentiment word is kept.
+
+- **Relationship history panel not shown on chat load**: the panel was only
+  refreshed after an extraction pass, so switching to a chat with existing
+  relationship data showed an empty panel until the next extraction. The panel
+  now refreshes on every chat-change event and after each extraction pass.
+
+- **Token budget bar not updating after manual pair deletion**: deleting a
+  relationship pair from the settings panel did not recalculate the token
+  display. The token bar is now updated immediately after a manual deletion.
+
+- **`undefined(undefined)` descriptor entries from old-format data**: entries
+  written before the per-descriptor magnitude format were not normalized before
+  the union merge, producing `undefined(undefined)` entries in the stored state.
+  `loadRelationshipHistory` now converts the old string-array format to the
+  per-descriptor object format on read so both old and new data are handled
+  transparently without a schema migration step.
+
+- **Descriptor type pollution in relationship history**: physical states,
+  character traits, and scene atmosphere were bleeding into relationship
+  descriptor lists. The extraction prompt now explicitly restricts descriptors
+  to how the subject feels toward the target, with a `target leaves the room`
+  test included as a quick check: if the descriptor still applies after the
+  target is gone (e.g. `tired`, `wet`, `nervous`) it is not a relationship
+  descriptor and must be omitted.
+
+- **Unbounded descriptor accumulation**: relationship pairs had no upper limit,
+  allowing a slow expansion of low-signal hedged variants (`slightly-p`,
+  `slightly-exc` and similar truncation artifacts) over many extraction passes.
+  A hard cap of 6 descriptors per pair is now enforced; when the cap is
+  exceeded the lowest-magnitude descriptor is dropped to make room.
+
+- **Multi-word activation triggers now match correctly**: triggers generated by
+  the LLM were stored as phrases (e.g. `camp exposure`) but the relevance scorer
+  checked each word individually, so a two-word trigger never fired. Trigger
+  parsing now splits each phrase into individual words before storing, ensuring
+  every trigger token can match independently against the recent message text.
+
+- **Arc extraction noise on small local models**: two filters now work in
+  combination to reduce false positives from 8B models that misfile
+  established facts and scene details as story arcs. A keyword filter in the
+  parser requires every new arc candidate to contain at least one signal of a
+  genuine open thread - goal or obligation language (`must`, `needs to`,
+  `promised`), incompleteness markers (`unknown`, `unclear`, `remains open`),
+  unknown-actor framing (`someone`, `the identity of`), or open question
+  structure (`who is`, `whether`). A second semantic filter in the extraction
+  pass compares each candidate against current session memories; candidates
+  that score above the similarity threshold are treated as rephrased scene
+  details and dropped. The semantic filter falls back to keyword matching
+  when embeddings are not available. The model test fixture was also rewritten
+  with a scenario designed to have three explicitly open threads that do not
+  resolve within the conversation, giving a clearer pass/fail baseline for
+  the arc tier.
+
+- **AI scene break detection accuracy**: truncation limits in the detection
+  prompt were cutting off transition signals before the model could read them
+  (600/800 character limits). Limits raised to 1000/1200 characters and the
+  YES criteria softened to detect location changes that do not include explicit
+  landmark language. This resolves cases where catch-up found only 1-2 scenes
+  in a long roleplay that had many transitions.
+
+- **Heuristic scene break patterns expanded**: added sleep/fall-asleep patterns,
+  relaxed wake-up detection (no longer requires dawn markers), movement verbs
+  leading to a new location, and extended location-arrival patterns for multi-word
+  place names and possessives. The heuristic is now more likely to catch natural
+  RP transitions during catch-up when AI detection is off.
+
+- **Epistemic extraction on final scene buffer**: the catch-up handler previously
+  only ran epistemic extraction on detected scene breaks mid-history. The final
+  scene buffer (messages after the last detected break) was never processed.
+  Epistemic extraction now always runs on the final buffer before catch-up
+  completes.
+
+- **Relationship History missing from token usage bar after catch-up**: relationship
+  history was extracted per chunk during catch-up but never re-injected, so the
+  token bar showed no slice for it even when pairs were stored. It is now re-injected
+  after each chunk update and in the final reinject when catch-up completes.
+
+- **State Ledger preserved on Forget This Chat**: state cards are no longer
+  cleared by **Forget This Chat**. State cards accumulate knowledge from
+  long-term memories across multiple sessions; clearing them on a chat reset
+  would permanently discard facts that cannot be reconstructed from the current
+  chat alone. The button tooltip and confirmation text now correctly list all
+  data that survives: long-term memories, relationship history, state cards,
+  canon, and pinned arcs.
+
+### Added
+
+- **Macro injection**: all 9 Smart Memory macros can be placed anywhere in a
+  character card or instruct template to control exactly where memory content appears
+  in the prompt, rather than relying on automatic injection depth and position settings.
+  The 8 per-tier macros are: `{{smartmemory-shortterm}}`, `{{smartmemory-longterm}}`,
+  `{{smartmemory-session}}`, `{{smartmemory-scenes}}`, `{{smartmemory-arcs}}`,
+  `{{smartmemory-relationships}}`, `{{smartmemory-canon}}`, `{{smartmemory-profiles}}`.
+  A ninth macro, `{{smartmemory-unified}}`, works alongside unified injection mode and
+  injects the full merged block wherever the token is placed - letting users control
+  the placement of the unified block the same way individual macros control per-tier
+  placement. Per-tier macros are inactive when unified injection is on (unified owns
+  those tiers); the unified macro is inactive when unified injection is off. Auto-detection
+  activates macro mode per tier when a token is found in the character card system prompt,
+  description, personality, scenario, or example messages. A "Force macro injection mode"
+  toggle in Configuration (advanced) activates all applicable macros at once for use with
+  instruct templates that cannot be auto-detected from card fields.
+
+- **Source-message provenance**: long-term and session memories now record which
+  message range they were extracted from. A **jump-to-source** button appears on
+  each memory entry when provenance is available - click it to scroll the chat
+  directly to the messages that produced the memory. The button is shown on session
+  memories whenever provenance is present, and on long-term memories only when the
+  source chat matches the current chat. Clicking the button closes the extensions
+  panel, scrolls the chat to the source range, and flashes the messages in the
+  range with a pulsing outline so they are easy to spot on landing. The jump button
+  is positioned before the edit button; only the delete button is styled in red -
+  edit and jump use the theme's default text color.
+
+- **Smart extraction window**: automatic extraction no longer re-processes
+  messages it has already seen. Each extraction pass records a cutoff index in
+  `chatMetadata`; the next pass starts from that cutoff rather than from a fixed
+  lookback. A minimum context floor (two extraction intervals) ensures the model
+  always has enough context for quality output even when few new messages have
+  arrived. The Memorize Chat and per-tier Extract Now buttons are unaffected and
+  continue to use their fixed windows.
+
+- **Pinned arc transfers for group chats**: story arcs can now be pinned in group
+  chats, bringing them to parity with solo chats. Pinned arcs are stored against
+  the group ID and automatically merged into new chats for that group on load.
+  On each chat load, stored group arc data for groups that no longer exist is
+  pruned automatically, preventing accumulation for users who create and remove
+  groups frequently.
+
+- **Resolved state for pinned arcs**: pinned arcs that get resolved by extraction
+  are now kept rather than deleted. They move into a separate **Resolved Threads**
+  section below the active arc list - collapsed by default and hidden entirely
+  when empty. Resolved arcs appear with strikethrough text and a muted border,
+  are not injected into context, and carry their resolved state into future chats
+  via the persistent store. A **re-open** button reactivates a thread if the
+  story revisits it (with a duplicate check against current active arcs); a
+  **remove** button discards it from both the panel and the persistent store.
+  New extraction passes treat resolved arcs as invisible so a fresh instance of a
+  similar thread can be added as active without being blocked as a duplicate.
+
+- **Extraction model test**: a **Test Extraction Model** button in the settings
+  panel runs a fixed 30-message roleplay scenario through every enabled extraction
+  tier (long-term memories, session memories, story arcs). Results are shown
+  tier-by-tier with prev/next navigation - each tier displays the model's raw
+  output alongside a hint explaining what a capable model should find. If any tier
+  returns empty output the test reports an immediate failure naming the tier, so
+  users can quickly identify whether their configured model is suitable without
+  reading through all tiers.
+
+- **Relationship History**: long-term per-character relationship state is now
+  tracked across sessions as a set of named pairs. After each extraction pass, the
+  model reviews the scene and emits delta lines describing how the relationship
+  between two characters has shifted - descriptors such as `warm`, `cautious`,
+  `distant` together with a magnitude (`low`, `medium`, `high`). Each pair is
+  stored under a `subject→target` key in the character's persistent record and
+  updated on every pass so the state always reflects the most recent emotional
+  arc. On injection, only pairs whose names appear in the recent message window
+  (or current group chat member list) are included, keeping the block compact.
+  New pairs can be seeded from the character card excerpt when the model does not
+  yet know a relationship; they can also be added, edited, and deleted manually
+  from the settings panel. Relationship History is cleared alongside long-term
+  memories when **Clear Memories** or **Fresh Start** is used. Schema v7 adds
+  the `relationship_history` field to all character records. The token budget is
+  drawn from a new `Relationship History` slice in the budget breakdown, funded
+  by reducing the arc and canon ratios by a small amount within the existing 3100
+  token default so the total default budget does not increase.
+
+- **Per-descriptor magnitudes for relationship history**: each relationship
+  descriptor now carries its own magnitude (`low`, `medium`, or `high`) rather
+  than a single shared magnitude for the whole pair. The output format is
+  `word(magnitude)` - e.g. `trusting(high), cautious(medium)`. Updates use a
+  union merge: existing descriptors are preserved unless explicitly removed with
+  a `!` prefix, new descriptors are added or update the magnitude of an existing
+  entry with the same word. This replaces the previous full-replacement model so
+  descriptors accumulate correctly over multiple extraction passes. The add and
+  edit forms in the settings panel use the same `word(magnitude)` format.
+
+- **Status message during relationship history extraction**: the extraction
+  status indicator in the settings panel now shows `Extracting relationship
+  history...` while the relationship history model call is in progress, matching
+  the feedback already shown for other extraction tiers.
+
+- **Contextual relevance for long-term memories**: the hybrid scorer now applies a
+  bonus to memories whose content words overlap with the current chat turn, so
+  memories about what is actually being discussed right now rise to the top of the
+  injection budget. The bonus is 40 pts per significant content word hit (capped at
+  three), with a higher 80 pt bonus reserved for LLM-suggested trigger keywords
+  (Profile B, not yet implemented) that add signal beyond what is in the content
+  itself. Memories that score a contextual hit are also placed at the end of the
+  main injection block and injected a second time into a secondary in-chat slot
+  closer to the prompt (configurable depth, default 4) so the roleplay model sees
+  them right before it responds. Schema v6 adds a `triggers` field to all memories.
+  On Profile B (hosted models) and when the **Generate contextual triggers**
+  setting is enabled (off by default), this field is populated at write time via
+  a short model call that asks the extraction LLM to suggest synonyms, hypernyms,
+  situational cues, and associated reactions for each new memory - words that would
+  signal relevance even when the exact memory vocabulary is not present in the turn.
+  LLM-suggested triggers score at 80 pts per hit (versus 40 pts for plain
+  content-word overlap) so memories with strong semantic relevance surface ahead of
+  memories that merely share vocabulary with the current turn. On Profile A without
+  the toggle, content-word overlap handles the baseline. Trigger generation applies
+  to both long-term memories and session memories.
+
+- **Perspectives & Secrets**: a new extraction tier that builds a per-character
+  knowledge map at every scene break. For each named character in the scene, the
+  model emits tagged entries describing five distinct epistemic states: `[knows]`
+  (confirmed facts), `[suspects]` (unconfirmed beliefs), `[believes]` (false beliefs
+  the character is certain of), `[unaware]` (things they do not know at all), and
+  `[hiding]` (things they know but are actively concealing from a specific other
+  character). On injection, only entries where the responding character is the
+  subject are included, so each character receives their own private knowledge block
+  rather than a shared one. This lets the AI maintain perspective-accurate
+  behaviour - playing ignorance correctly, sustaining deceptions, and never acting
+  on information the character could not have.
+
+  Long-term memories now carry a `witnessed_by` field recording which characters
+  were present when the memory was extracted. Memories from scenes the responding
+  character was not in are prefixed `[secondhand]` in the long-term injection block,
+  flagging them as hearsay rather than direct experience. This can be disabled in
+  favour of omitting non-witnessed memories entirely.
+
+  Deduplication uses the same embedding-primary, Jaccard-fallback approach as other
+  tiers with a 0.70 threshold. Entries are stored in the character's persistent
+  record and survive across sessions. The token budget (200 tokens by default) is
+  funded from within the shared total by a small reduction to the arc and canon
+  ratios. Schema v8 adds `epistemic_knowledge: []` to all character records and
+  backfills `witnessed_by: []` on existing long-term memories.
+
+  On Profile A (local/low-VRAM hardware) the feature is off by default; a per-section
+  override toggle enables it when the local model is reasoning-capable. Entries can
+  be added, edited, and deleted manually from the **Perspectives & Secrets** section
+  in the settings panel. The `{{smartmemory-epistemic}}` macro is also available for
+  placement-controlled injection. The extraction model test now includes a separate
+  Mira/Sera/Ryn/Dael scene designed to exercise all five epistemic tags.
+
+- **State Ledger**: tracks the current observable physical and operational state of
+  named entities (characters, objects, places, factions) as a compact snapshot.
+  Extracted per session from the same message window as other extraction tiers;
+  injected as a tightly formatted block near the current action so the AI stays
+  grounded in what is visible right now rather than relying on scattered memories.
+
+  Supported entity types and their fields:
+  - character: location, injuries, outfit/disguise, mood, active goal, carried items
+  - object: owner, location, condition, status
+  - place: occupants, hazards, political control, damage, accessibility
+  - faction: leadership, objective, alliances, hostility level
+
+  State cards are chat-scoped - current state does not carry over when a new chat
+  begins. Each state card is stored under a `name|type` key in `chatMetadata` and
+  kept in sync with the entity registry: type changes migrate the card to the new
+  key; merges with conflicting cards open a modal to pick which card survives; delete
+  warns before discarding a populated card. Cards can also be created and edited
+  manually from the entity panel below each entity row.
+
+  Extraction runs sequentially after other tiers to stay within VRAM limits. The
+  parser silently drops placeholder values (`unknown`, `none`, `not mentioned`, etc.)
+  that weaker models emit instead of omitting unknown fields. On Profile A the feature
+  is off by default; a per-section override enables it when the local model is
+  reasoning-capable. The token budget (200 tokens by default) is funded by a small
+  reduction to the arc and canon ratios (schema v9 adds `state_ledger: {}` to all
+  chat metadata). The `{{smartmemory-stateledger}}` macro is available for
+  placement-controlled injection. The extraction model test now includes a dungeon
+  scene designed to exercise current-vs-past state, sparse output, and multiple
+  entity types.
+
+- **Catch-up runs Epistemic and State Ledger**: the catch-up handler now runs
+  Perspectives & Secrets and State Ledger extraction alongside all other tiers.
+  Epistemic extraction fires at each detected scene break and once more on the
+  final scene buffer so knowledge from the last scene is never lost. State Ledger
+  extraction runs after each chunk. Both tiers are gated by their feature flags
+  and by `isFreshStart` so they are skipped when the chat has no prior context.
+
+- **AI scene break detection in catch-up**: when **Use AI detection** is enabled
+  for scenes, catch-up now uses `detectSceneBreakAI` instead of the heuristic.
+  A progress counter (`Detecting scene breaks... (n/total)`) updates the status
+  line on every AI message so long catch-up runs stay visible.
+
+- **Partner change as a scene break trigger**: the AI scene detection prompt now
+  recognises a change in intimate partner as a new-scene signal. Two separate
+  encounters with different people in the same location were previously treated
+  as one continuous scene; they are now split at the point where a previous
+  partner has left and a new one arrived.
+
+- **Perspectives & Secrets spoiler wall**: `believes` (false beliefs) and
+  `hiding` (active concealments) entries are now grouped behind a collapsible
+  spoiler block at the bottom of the entry list. The block is always rendered so
+  the user can tell whether any spoiler-type entries exist - when empty it shows
+  "No false beliefs or hidden secrets found." Opening it requires confirming a
+  warning dialog to prevent accidental reveals in mystery or secret-role
+  scenarios. The summary uses a lock/unlock icon and amber styling to distinguish
+  it from the regular list, and swaps to "click to hide" when open.
+
+- **Per-chat Perspectives & Secrets budget auto-grow**: when the knowledge block
+  exceeds the current injection budget, a dialog offers to increase the budget
+  for this roleplay. In normal flow the budget grows by 100 tokens per
+  confirmation; after catch-up a single dialog sets the exact size needed plus
+  100 tokens of headroom so the next scene break does not immediately overflow
+  again. The override is stored per-chat in `chatMetadata` and does not change
+  the settings slider.
+
+- **Trim indicator on the token usage bar**: each segment of the token usage bar
+  now shows a red underline when that tier is actively trimming content to fit its
+  budget. The hover tooltip extends to show how many tokens were dropped alongside
+  the injected count. The indicator resets on every chat switch so it only reflects
+  the current state.
+
+- **One-time trim notification**: the first time any memory tier trims content in
+  a chat, a toast notification appears directing the user to the token bar in
+  settings. The notification fires at most once per chat and never repeats for that
+  chat, so it is visible to users who do not regularly open the settings panel
+  without becoming intrusive.
+
+- **Auto-tune respects actual demand before cutting headroom**: when the sum
+  of all tier targets exceeds the total budget cap, auto-tune now cuts
+  headroom first rather than scaling every tier down proportionally. Tiers
+  that are actively trimming receive at least enough budget to fit their
+  current content; only the 15% headroom above that is reduced to stay
+  within the cap. If even the bare minimums exceed the cap, proportional
+  scaling applies as a last resort and the total budget slider remains the
+  correct control to use.
+
+- **Auto-tune budget allocation (experimental)**: an opt-in toggle in Developer
+  settings automatically redistributes the per-tier token budget after each
+  extraction pass based on observed demand. Tiers using less than their budget give
+  the surplus to tiers that are trimming content. The configured total budget acts
+  as a hard cap - auto-tune never increases total memory usage beyond what the
+  slider allows. Sliders update live so the reallocation is visible. Disabled by
+  default so manually tuned advanced budgets are not overwritten. Note: the system
+  does not account for the rest of the context window (character card, chat
+  messages, system prompt) - the total budget slider remains the user's safety
+  valve against crowding out actual roleplay.
+
+- **OKLCH perceptually uniform colors throughout**: all colored UI elements -
+  token bar tier slices, memory type badges, row tint backgrounds, the type-picker
+  widget, and the force graph memory node colors - now use the OKLCH color space
+  for perceptually uniform hue separation. Token bar tiers use 10 hues at 36-degree
+  intervals at `oklch(62% 0.14)`. Memory type badges (long-term and session) use
+  8 hues at 45-degree intervals at `oklch(57% 0.10)` - lower chroma so they read as
+  clearly distinct from the bar slices. Type-picker hover states lighten to
+  `oklch(70% 0.10)` within the same hue. The force graph uses the same 8 badge
+  colors for memory nodes so the graph and the settings panel stay in sync.
+  Because all hues share the same lightness and chroma they read as a cohesive
+  family rather than a collection of unrelated colors.
+
 ## [1.6.11] - 2026-05-10
 
 ### Added

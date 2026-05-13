@@ -39,6 +39,10 @@
  * buildProfileGenerationPrompt     - generates character_state, world_state, and relationship_matrix from stored memories
  * buildCanonSummaryPrompt          - generates a stable per-character canon narrative from arc summaries and memories
  * buildSupersessionConfirmPrompt   - binary UPDATE/INDEPENDENT prompt for model-confirmed supersession (method B)
+ * buildTriggerGenerationPrompt     - asks the model for contextual trigger keywords for a single memory (Profile B)
+ * buildRelationshipDeltaPrompt     - extracts per-pair relationship state changes with magnitude from a scene
+ * buildEpistemicExtractionPrompt   - extracts a per-character knowledge map (knows/unaware/suspects/believes/hiding)
+ * buildStateCardPrompt              - extracts current-state fields for known entities from a message window
  *
  * Entity tagging: both extraction prompts instruct the model to append an
  * optional `:entity=Name1,Name2` suffix to the bracket tag for any memory
@@ -238,24 +242,25 @@ If nothing new, output exactly: NONE`
  */
 export function buildSceneDetectPrompt(currentMessage, previousMessage) {
   const prevSection = previousMessage
-    ? `PREVIOUS MESSAGE (for context - the scene that just ended or is continuing):\n${previousMessage.slice(0, 600)}\n\n`
+    ? `PREVIOUS MESSAGE (for context - the scene that just ended or is continuing):\n${previousMessage.slice(0, 1000)}\n\n`
     : '';
 
   return `${prevSection}CURRENT MESSAGE:
-${currentMessage.slice(0, 800)}
+${currentMessage.slice(0, 1200)}
 
 ---
 Did the CURRENT MESSAGE mark the start of a new scene?
 
 A NEW SCENE starts when:
-- A meaningful amount of time has passed (hours, days, sleep, dawn breaking, waking up after rest)
-- The characters have moved to a clearly different location
-- A hard narrative break occurs (portal, transition, loss of consciousness then recovery, etc.)
+- Time has passed - sleep, waking up, dawn breaking, or any gap between the previous and current message
+- The characters have moved to a different location (a new room, building, outdoor area, or setting)
+- A hard narrative break occurs (transition, loss of consciousness then recovery, etc.)
+- The person the main character is alone with or intimate with has changed (a previous partner has left and a new one has arrived)
 
 NOT a new scene:
 - Action, combat, or drama continuing in the same location and moment
 - Emotional beats or dialogue within the same continuous encounter
-- The story picking up seconds or minutes after the previous message
+- The story picking up seconds or minutes after the previous message with no location change
 
 Answer YES or NO only. Nothing else.`;
 }
@@ -287,15 +292,26 @@ export function buildArcExtractionPrompt(chatHistory, existingArcs) {
 ${existingSection}CONVERSATION:\n${chatHistory}
 
 ---
-Extract open story threads - unresolved conflicts, promises made, character goals, mysteries introduced, tensions established.
+Extract the most significant open story threads from the conversation: unresolved conflicts, unfulfilled promises, active character goals, open mysteries, and tensions that have not yet played out. Aim for the 3-5 threads that matter most to the story - do not list every detail that has not resolved.
+
+An arc is something still in motion across the story - a question not yet answered, a goal not yet reached, a conflict still active. Do NOT output facts about things that already happened and are over.
+
+These are NOT arcs - do not output them:
+- Tactical details or logistical information ("the south gate is unguarded after midnight")
+- Single-scene contingencies that may or may not become relevant ("Fen might be useful")
+- Consequences or sub-threads of the same arc - group them into one entry
+- Facts about events that already occurred, even dramatic ones
 
 Output format - one entry per line, two tags allowed:
   [arc] <new unresolved thread from this conversation, not already listed above>
   [resolved] <title or brief description of an existing arc that was explicitly closed>
 
-Example output:
-  [arc] Mira swore revenge on the merchant who sold her into slavery.
+Examples:
+  [arc] Mira swore revenge on the merchant - she has not acted on it yet.
+  [arc] The identity of whoever burned the granary is still unknown.
   [resolved] The missing heir was found alive in the northern keep.
+  NOT an arc: "Kira was captured by the guards." - this is a fact, not an open thread.
+  NOT an arc: "The back door is unlocked." - this is a tactical detail, not a story thread.
 
 Only output [arc] for threads that are NEW in this conversation - do not re-output existing arcs.
 Only mark [resolved] if the conversation directly closes the arc - a promise kept, a mystery answered, a conflict ended. A related revelation is NOT a resolution. If new information makes an existing arc more urgent or complicated, it stays open.
@@ -693,5 +709,234 @@ CURRENT STATE:
 [A paragraph on where things stand now - unresolved tensions, active goals, and where the story is heading]
 
 Output only the three labelled paragraphs. No preamble, no disclaimers.`
+  );
+}
+
+// ---- Activation trigger generation (Profile B) ------------------------------
+
+/**
+ * Asks the model to suggest contextual trigger keywords for a single memory.
+ * Used on Profile B (hosted models) at write time so that memories can be
+ * surfaced by synonyms and situational cues that do not literally appear in
+ * the memory text.
+ *
+ * The model is instructed to avoid repeating words already in the memory and
+ * to focus on what someone would say or describe when the memory is relevant,
+ * not just what the memory itself says.
+ *
+ * @param {string} content - The memory content string.
+ * @returns {string} The assembled prompt.
+ */
+export function buildTriggerGenerationPrompt(content) {
+  return (
+    NO_ACTION_PREAMBLE +
+    `[KEYWORD TASK - Output a comma-separated list only. Do NOT continue any story or explain your choices.]\n\n` +
+    `Memory: "${content}"\n\n` +
+    `List 4 to 6 keywords that would signal this memory is relevant to a conversation. Think broadly:\n` +
+    `- Synonyms for key concepts in the memory\n` +
+    `- Broader categories that contain the specific thing (e.g. "insects" for a bee allergy)\n` +
+    `- Situational cues - things someone would encounter or describe when this memory matters\n` +
+    `- Emotional or physical reactions associated with this memory\n\n` +
+    `Do NOT repeat words already in the memory text. Output short single words or two-word phrases only.\n\n` +
+    `Output format: keyword1, keyword2, keyword3\n` +
+    `Output:`
+  );
+}
+
+/**
+ * Builds the prompt for relationship delta extraction.
+ *
+ * Given a scene and the current baseline relationship state for known pairs,
+ * the model outputs one line per pair that changed, in the format:
+ *   subject->target: descriptor, descriptor, magnitude=low|medium|high
+ *
+ * For new character pairs with no prior state, the caller may include a
+ * character card excerpt so the model can seed the initial state from it.
+ * If the pair is introduced mid-scene the model seeds from the prose instead.
+ *
+ * Magnitude guidelines:
+ *   low    - minor shift: a kind gesture, a small disagreement
+ *   medium - notable event: a confession, a betrayal discovered, a reconciliation
+ *   high   - life-changing or traumatic: murder, profound loss, years of bonding
+ *
+ * @param {string} sceneText - The scene messages to analyze.
+ * @param {string} currentState - Current baselines, one "A->B: descriptors" line per known pair. Empty string if none.
+ * @param {string} characterCardExcerpt - Relevant character card text for seeding new pairs. Empty string if not available.
+ * @returns {string} The assembled prompt.
+ */
+export function buildRelationshipDeltaPrompt(sceneText, currentState, characterCardExcerpt = '') {
+  const cardSection = characterCardExcerpt.trim()
+    ? `Character background (use only to seed new pairs with no prior state):\n${characterCardExcerpt.trim()}\n\n`
+    : '';
+  const stateSection = currentState.trim()
+    ? `Current relationship state (carry ALL of these forward unless explicitly resolved):\n${currentState.trim()}\n\n`
+    : '';
+
+  return (
+    `[RELATIONSHIP HISTORY TASK - Output structured data only. Do NOT continue the roleplay.]\n\n` +
+    `You maintain a relationship history record for ALL named characters in the scene - not only the character whose card is provided below. The card is background context only.\n\n` +
+    `The existing state lists what is already known and TRUE.\n` +
+    `Your job is to output the updated state by:\n` +
+    `1. Keeping ALL existing descriptors (they remain true unless the scene proves otherwise)\n` +
+    `2. Adding new descriptors observed in the scene - maximum 6 per pair total\n` +
+    `3. Prefixing a descriptor with ! only if the scene explicitly resolves it\n\n` +
+    `Descriptors must describe how subject FEELS TOWARD or RELATES TO target.\n` +
+    `Good examples: affectionate, trusting, jealous, protective, hostile, admiring, wary, grateful, resentful.\n` +
+    `NOT physical states (sleepy, wet, blushing), NOT character traits (impulsive, naive), NOT scene atmosphere.\n` +
+    `Test: would this word still apply if the target left the room? If yes, it is not a relationship descriptor.\n\n` +
+    `Example:\n` +
+    `Existing: Alice -> Bob: fond(high), nervous(medium)\n` +
+    `Scene: Alice confesses her feelings. Bob smiles and takes her hand. Meanwhile Carol watches them, clearly envious.\n` +
+    `Output:\n` +
+    `Alice -> Bob: fond(high), nervous(medium), open(high)\n` +
+    `Carol -> Alice: envious(medium)\n` +
+    `(Alice/Bob: fond and nervous kept, open added. Carol included even though she has no card - she is named and her feeling is clear.)\n\n` +
+    `Rules:\n` +
+    `- subject -> target and target -> subject are separate lines - feelings are not always mutual\n` +
+    `- Each descriptor gets its own magnitude: (low), (medium), or (high)\n` +
+    `- high = deep or persistent; medium = notable; low = mild or fleeting\n` +
+    `- Use magnitude to express intensity, not hedge words: nervous(low) not slightly nervous(medium)\n` +
+    `- Capture ALL named characters with observable relationships - NPCs and characters without cards count\n` +
+    `- Include named animals and non-human characters if they have a meaningful relationship with someone\n` +
+    `- Do not include unnamed extras or background crowd members\n` +
+    `- Output NONE if no relevant pairs appear in the scene\n\n` +
+    `Format: Subject -> Target: descriptor(magnitude), descriptor(magnitude)\n\n` +
+    cardSection +
+    stateSection +
+    `Scene:\n${sceneText}\n\n` +
+    `Output:`
+  );
+}
+
+// ---- Epistemic extraction -----------------------------------------------
+
+/**
+ * Builds the epistemic extraction prompt for a scene.
+ *
+ * Produces a per-character knowledge map using five tags: knows, unaware,
+ * suspects, believes, hiding. The prompt body was validated over five rounds
+ * of iterative testing - every rule exists because a specific failure mode was
+ * observed without it. Do not simplify.
+ *
+ * @param {string} sceneText - The scene messages formatted as a chat excerpt.
+ * @param {string[]} participants - Character names present in the scene (hint only).
+ * @returns {string} The complete prompt string.
+ */
+export function buildEpistemicExtractionPrompt(sceneText, participants) {
+  const participantHint =
+    participants.length > 0
+      ? `Characters present in this scene: ${participants.join(', ')}.\n\n`
+      : '';
+
+  return (
+    NO_ACTION_PREAMBLE +
+    `[EPISTEMIC EXTRACTION TASK - Output structured data only. Do NOT continue the roleplay.]\n\n` +
+    `You are building a knowledge map: for each named character, what do they know,\n` +
+    `what do they falsely believe, what do they suspect, and what are they concealing?\n\n` +
+    `Output one entry per character per fact, using these tags:\n\n` +
+    `[knows]    Character | fact they have direct knowledge of\n` +
+    `[unaware]  Character | fact they do not know (but others do)\n` +
+    `[suspects] Character | incomplete belief - they sense something but lack proof\n` +
+    `[believes] Character | something they hold as true that is actually false\n` +
+    `[hiding]   Concealer from Target | what they are actively concealing\n\n` +
+    `Rules:\n` +
+    `- Only record what is established by the scene - do not infer beyond what is shown\n` +
+    `- Use the character's name exactly as it appears in the scene\n` +
+    `- Each line covers one character and one fact\n` +
+    `- Do not output the same fact twice for the same character\n\n` +
+    `- WITNESS RULE: if the scene explicitly states a character observed or witnessed\n` +
+    `  something, you MUST output a [knows] line for that character - do not omit it\n\n` +
+    `- UNAWARE COMPLEMENT: when you write [knows] X | fact, ask whether another named\n` +
+    `  character does not know that fact. If the scene establishes they do not, write\n` +
+    `  the corresponding [unaware] line for them\n\n` +
+    `- HIDING RULE: [hiding] means the concealer possesses a fact and is actively\n` +
+    `  keeping it from a specific target. Do NOT write [hiding] for a character the\n` +
+    `  concealer has already told. An explicit oath or promise of secrecy establishes\n` +
+    `  [hiding] for the oath-taker toward the person the secret is being kept from\n\n` +
+    `- KNOWS vs SUSPECTS: if a character is explicitly told a fact, use [knows].\n` +
+    `  Reserve [suspects] only for characters who have a feeling without being\n` +
+    `  directly informed\n\n` +
+    `- DECEPTION RULE: when a character makes a false statement, write [hiding] for\n` +
+    `  the liar. Then check whether the character who heard it accepted it without\n` +
+    `  challenge - if so, also write [believes] for them with the false content.\n` +
+    `  Always write both lines together\n\n` +
+    `- CONTRADICTION RULE: if a character states their location or actions, check\n` +
+    `  whether the scene already established where they actually were. If the\n` +
+    `  statement contradicts that established fact, treat it as a lie and apply the\n` +
+    `  DECEPTION RULE\n\n` +
+    `- BELIEVES RULE: [believes] is ONLY for false beliefs - content that is\n` +
+    `  demonstrably untrue based on the scene. Do not use it for things a character\n` +
+    `  is merely thinking, feeling, or correctly concluding\n\n` +
+    `Example:\n` +
+    `Scene: Kael pocketed the gem while Lyria watched from the doorway. Later he told\n` +
+    `Fen about the theft but swore him to silence. When Lyria asked Kael if anything\n` +
+    `was missing, he shrugged and said he hadn't noticed.\n\n` +
+    `Output:\n` +
+    `[knows] Kael | he took the gem\n` +
+    `[knows] Lyria | Kael took the gem\n` +
+    `[knows] Fen | Kael took the gem\n` +
+    `[unaware] Kael | Lyria saw him take the gem\n` +
+    `[hiding] Kael from Lyria | the theft\n` +
+    `[hiding] Fen from Lyria | Kael told him about the theft\n` +
+    `[believes] Lyria | Kael did not notice anything was missing\n\n` +
+    `Notes:\n` +
+    `- Fen was told directly so [knows] not [suspects]\n` +
+    `- Kael told Fen so [hiding] only applies toward Lyria, not Fen\n` +
+    `- Kael's shrug contradicts the established fact he took the gem\n` +
+    `  (CONTRADICTION RULE) - apply DECEPTION RULE: [hiding] Kael + [believes] Lyria\n` +
+    `- Fen swore silence so [hiding] Fen from Lyria (oath establishes hiding)\n` +
+    `- Lyria's [believes] records a false belief - Kael actually did notice\n\n` +
+    `---\n\n` +
+    participantHint +
+    `Scene:\n${sceneText}\n\n` +
+    `Output:`
+  );
+}
+
+/**
+ * Builds the state card extraction prompt for the current message window.
+ *
+ * Asks the model to output current-state fields for each known entity whose
+ * state is visible in the excerpt. Output is sparse: only fields that are
+ * explicitly established or directly shown appear; unknown fields are omitted.
+ *
+ * Validated against Gemma (Profile B) and Qwen (Profile A). Gemma handles
+ * all cases correctly. Qwen over-infers on some fields despite strict rules -
+ * the parser filters noise values, but state ledger extraction is Profile-gated
+ * for this reason.
+ *
+ * @param {string} excerpt - Recent messages formatted as "Name: message" lines.
+ * @param {Array<{name: string, type: string}>} entityList - Entities in scope.
+ * @returns {string} The full prompt string.
+ */
+export function buildStateCardPrompt(excerpt, entityList) {
+  const entityLines = entityList.map((e) => `- ${e.name} (${e.type})`).join('\n');
+
+  return (
+    NO_ACTION_PREAMBLE +
+    `[STATE EXTRACTION TASK - Do NOT continue the roleplay. Output structured data only.]\n\n` +
+    `You are tracking the current physical and operational state of known entities in a story.\n\n` +
+    `Known entities:\n${entityLines}\n\n` +
+    `Available fields by type:\n` +
+    `- character: location, injuries, outfit_disguise, mood, active_goal, carried_items\n` +
+    `- object: owner, location, condition, status\n` +
+    `- place: occupants, hazards, political_control, damage, accessibility\n` +
+    `- faction: leadership, objective, alliances, hostility_level\n\n` +
+    `Output one line per entity. One tag at the start of the line containing the entity\n` +
+    `name and type, then all known fields after it separated by |:\n\n` +
+    `[state:Kael:character] location=dungeon | injuries=graze on left shoulder | carried_items=silver key\n` +
+    `[state:Silver Key:object] owner=Kael | location=on Kael's person\n` +
+    `NONE\n\n` +
+    `STRICT RULES - violations produce unusable output:\n` +
+    `- ONLY include fields that are EXPLICITLY stated or DIRECTLY shown in the text.\n` +
+    `  Do not infer, deduce, or reason about what is probably true.\n` +
+    `- A field you are not certain about MUST be omitted entirely. NEVER write\n` +
+    `  fieldname=unknown, fieldname=none, fieldname=not mentioned, or any similar\n` +
+    `  placeholder. Either you know the value from the text or the field is absent.\n` +
+    `- If an entity is not mentioned in the excerpt, do not output a line for it at all.\n` +
+    `  An entity with no known fields produces no output - not a line of unknowns.\n` +
+    `- If nothing is known about any entity, output: NONE\n\n` +
+    `Excerpt:\n${excerpt}\n\n` +
+    `Output:`
   );
 }

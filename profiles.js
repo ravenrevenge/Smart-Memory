@@ -54,6 +54,8 @@ import { buildProfileGenerationPrompt } from './prompts.js';
 import { parseProfileOutput } from './parsers.js';
 import { smLog } from './logging.js';
 import { invalidateUnifiedCache } from './unified-inject.js';
+import { MACRO_NAMES, setMacroContent, isMacroActive } from './macros.js';
+import { reportTierTrimStats } from './trim-stats.js';
 
 // Default staleness threshold: 30 minutes. Profiles generated within this
 // window are considered current and will not be regenerated on chat load.
@@ -210,6 +212,7 @@ export function injectProfiles(characterName) {
   const settings = extension_settings[MODULE_NAME];
 
   if (!settings.profiles_enabled) {
+    setMacroContent(MACRO_NAMES.profiles, '');
     setExtensionPrompt(PROMPT_KEY_PROFILES, '', extension_prompt_types.NONE, 0);
     invalidateUnifiedCache(PROMPT_KEY_PROFILES);
     return;
@@ -217,15 +220,23 @@ export function injectProfiles(characterName) {
 
   const profiles = loadProfiles(characterName);
   if (!profiles) {
+    setMacroContent(MACRO_NAMES.profiles, '');
     setExtensionPrompt(PROMPT_KEY_PROFILES, '', extension_prompt_types.NONE, 0);
     invalidateUnifiedCache(PROMPT_KEY_PROFILES);
     return;
   }
 
   const budget = settings.profiles_inject_budget ?? 200;
+  const sections = [
+    profiles.character_state,
+    profiles.world_state,
+    profiles.relationship_matrix,
+  ].filter(Boolean);
+  const fullTokens = estimateTokens(sections.join('\n\n'));
   const text = formatProfiles(profiles, budget);
 
   if (!text) {
+    setMacroContent(MACRO_NAMES.profiles, '');
     setExtensionPrompt(PROMPT_KEY_PROFILES, '', extension_prompt_types.NONE, 0);
     invalidateUnifiedCache(PROMPT_KEY_PROFILES);
     return;
@@ -233,6 +244,14 @@ export function injectProfiles(characterName) {
 
   const template = settings.profiles_template ?? '{{profiles}}';
   const content = template.replace('{{profiles}}', text);
+  reportTierTrimStats(PROMPT_KEY_PROFILES, estimateTokens(content), fullTokens);
+
+  setMacroContent(MACRO_NAMES.profiles, content);
+  if (isMacroActive(MACRO_NAMES.profiles)) {
+    setExtensionPrompt(PROMPT_KEY_PROFILES, '', extension_prompt_types.NONE, 0);
+    invalidateUnifiedCache(PROMPT_KEY_PROFILES);
+    return;
+  }
 
   setExtensionPrompt(
     PROMPT_KEY_PROFILES,

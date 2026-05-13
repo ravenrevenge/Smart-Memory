@@ -33,6 +33,7 @@ import {
   setExtensionPrompt,
   saveSettingsDebounced,
   getMaxContextSize,
+  stopGeneration,
 } from '../../../../script.js';
 import { callGenericPopup, POPUP_TYPE } from '../../../../scripts/popup.js';
 import { getContext, extension_settings } from '../../../extensions.js';
@@ -40,8 +41,16 @@ import {
   estimateTokens,
   MODULE_NAME,
   META_KEY,
+  PROMPT_KEY_LONG,
+  PROMPT_KEY_SESSION,
+  PROMPT_KEY_SCENES,
+  PROMPT_KEY_ARCS,
   PROMPT_KEY_PROFILES,
   PROMPT_KEY_CANON,
+  PROMPT_KEY_RELATIONSHIPS,
+  PROMPT_KEY_EPISTEMIC,
+  PROMPT_KEY_STATE_LEDGER,
+  generateMemoryId,
 } from './constants.js';
 import { memory_sources, fetchOllamaModels } from './generate.js';
 import { runCompaction, injectSummary, loadAndInjectSummary } from './compaction.js';
@@ -51,12 +60,25 @@ import {
   injectMemories,
   loadCharacterMemories,
   clearCharacterMemories,
+  clearRelationshipHistory,
+  loadRelationshipHistory,
+  saveRelationshipHistory,
+  injectRelationshipHistory,
   isFreshStart,
   setFreshStart,
   getReadOnlyStartIndex,
   setReadOnlyStartIndex,
   getReadOnlyStartTime,
 } from './longterm.js';
+import {
+  clearEpistemicKnowledge,
+  extractEpistemicKnowledge,
+  injectEpistemicKnowledge,
+  isEpistemicEnabled,
+  loadEpistemicKnowledge,
+  saveEpistemicKnowledge,
+  resetEpistemicWarnFlag,
+} from './epistemic.js';
 import { hideChatMessageRange } from '../../../../scripts/chats.js';
 import { generateRecap, displayRecap } from './recap.js';
 import {
@@ -73,19 +95,33 @@ import {
   loadSceneHistory,
   saveSceneHistory,
   clearSceneHistory,
+  detectSceneBreakAI,
   detectSceneBreakHeuristic,
 } from './scenes.js';
 import { extractArcs, injectArcs, clearArcs, clearArcSummaries, loadArcSummaries } from './arcs.js';
+import { runModelTest } from './model-test.js';
+
+/** Set to true while a model test is running to allow cancellation. */
+let modelTestRunning = false;
 import { checkContinuity, generateRepair, injectRepair } from './continuity.js';
 import { getHardwareProfile, getEmbeddingBatch, clearEmbeddingFailed } from './embeddings.js';
 import { clearCanon, generateCanon, injectCanon, saveCanon } from './canon.js';
 import { clearSessionEntityRegistry } from './graph-migration.js';
+import {
+  clearStateLedger,
+  injectStateLedger,
+  isStateLedgerEnabled,
+  runStateCardExtraction,
+} from './state-ledger.js';
 import { generateProfiles, injectProfiles, clearProfiles, loadProfiles } from './profiles.js';
 import { clearUnifiedSlot, injectUnified, maybeInjectUnified } from './unified-inject.js';
+import { getTierTrimStats } from './trim-stats.js';
 import { showMemoryGraph } from './graph.js';
 import {
   setStatusMessage,
   updateLongTermUI,
+  updateRelationshipHistoryUI,
+  updateEpistemicUI,
   updateSessionUI,
   updateScenesUI,
   updateArcsUI,
@@ -147,7 +183,17 @@ export const defaultSettings = {
   longterm_position: extension_prompt_types.IN_PROMPT,
   longterm_depth: 2,
   longterm_role: extension_prompt_roles.SYSTEM,
+  longterm_triggered_depth: 4,
+  longterm_triggers_enabled: false,
   longterm_template: 'Memories from previous conversations:\n{{memories}}',
+
+  // Relationship history
+  relationships_enabled: true,
+  relationships_inject_budget: 250,
+  relationships_position: extension_prompt_types.IN_CHAT,
+  relationships_depth: 5,
+  relationships_role: extension_prompt_roles.SYSTEM,
+  relationships_template: 'Relationship history:\n{{relationships}}',
 
   // Session memory
   session_enabled: true,
@@ -218,11 +264,34 @@ export const defaultSettings = {
   profiles_role: extension_prompt_roles.SYSTEM,
   profiles_template: '{{profiles}}',
 
+  // Perspectives & Secrets (epistemic tracking)
+  epistemic_enabled: true,
+  epistemic_inject_unaware: true,
+  epistemic_secondhand_framing: true,
+  epistemic_response_length: 400,
+  epistemic_inject_budget: 200,
+  epistemic_depth: 1,
+  epistemic_position: extension_prompt_types.IN_CHAT,
+  epistemic_role: extension_prompt_roles.SYSTEM,
+
+  // State Ledger (structured entity state cards)
+  state_ledger_enabled: false,
+  state_ledger_inject_budget: 200,
+  state_ledger_depth: 1,
+  state_ledger_position: extension_prompt_types.IN_CHAT,
+  state_ledger_role: extension_prompt_roles.SYSTEM,
+
   // Hardware profile - 'auto' | 'a' | 'b'
   // 'auto': detect from memory source (ollama/webllm -> A, main/openai_compat -> B)
   // 'a': force Profile A (local/low-VRAM behaviour)
   // 'b': force Profile B (hosted/high-performance behaviour)
   hardware_profile: 'auto',
+
+  // Automatically reallocate the per-tier token budget after each extraction pass,
+  // based on actual observed demand. Tiers with unused headroom give it to tiers
+  // that are trimming content. The configured total budget is treated as a hard cap.
+  // Off by default so manually tuned advanced budgets are not overwritten.
+  auto_tune_budgets: false,
 
   // Show a non-blocking activity indicator while background extraction is running.
   // Gives users a visible signal that Smart Memory is working so they know not
@@ -236,6 +305,15 @@ export const defaultSettings = {
   // Experimental: merge all tier content into a single IN_PROMPT block instead
   // of injecting each tier into its own named slot at different depths/positions.
   unified_injection: false,
+  unified_position: 2, // extension_prompt_types.IN_PROMPT (Before Main Prompt)
+  unified_depth: 0,
+  unified_role: 0, // extension_prompt_roles.SYSTEM
+
+  // Force macro injection mode for all tiers regardless of character card content.
+  // Use this when macros are placed in instruct templates (which cannot be auto-detected
+  // from character card fields). Auto-detection handles the common case of macros placed
+  // in the system prompt or other card fields without needing this toggle.
+  macros_enabled: false,
 
   // Per-character memory storage (populated at runtime by longterm.js)
   characters: {},
@@ -252,9 +330,12 @@ const BUDGET_RATIOS = {
   longterm: 0.16,
   session: 0.13,
   scenes: 0.1,
-  arcs: 0.22,
-  canon: 0.26,
+  arcs: 0.13,
+  canon: 0.18,
   profiles: 0.13,
+  relationships: 0.08,
+  epistemic: 0.06,
+  state_ledger: 0.06,
 };
 
 /**
@@ -270,7 +351,10 @@ function totalBudgetFromSettings(s) {
     (s.scene_inject_budget ?? 300) +
     (s.arcs_inject_budget ?? 700) +
     (s.canon_inject_budget ?? 800) +
-    (s.profiles_inject_budget ?? 400)
+    (s.profiles_inject_budget ?? 400) +
+    (s.relationships_inject_budget ?? 250) +
+    (s.epistemic_inject_budget ?? 200) +
+    (s.state_ledger_inject_budget ?? 200)
   );
 }
 
@@ -289,6 +373,169 @@ function applyTotalBudget(total, s) {
   s.arcs_inject_budget = snap(total * BUDGET_RATIOS.arcs);
   s.canon_inject_budget = snap(total * BUDGET_RATIOS.canon);
   s.profiles_inject_budget = snap(total * BUDGET_RATIOS.profiles);
+  s.relationships_inject_budget = snap(total * BUDGET_RATIOS.relationships);
+  s.epistemic_inject_budget = snap(total * BUDGET_RATIOS.epistemic);
+  s.state_ledger_inject_budget = snap(total * BUDGET_RATIOS.state_ledger);
+}
+
+/**
+ * Re-injects all memory tiers using the current budget settings and refreshes
+ * the token bar. Called after any budget slider change so the trim indicators
+ * clear immediately without waiting for the next message.
+ *
+ * Most inject functions are synchronous reads from stored data - no model calls.
+ * injectMemories may use embeddings for scoring but falls back to sync scoring,
+ * so the token bar updates promptly in all cases.
+ *
+ * @param {string|null} characterName - Active character (or group selection).
+ */
+function reinjectAfterBudgetChange(characterName) {
+  loadAndInjectSummary();
+  injectMemories(characterName);
+  injectRelationshipHistory(characterName);
+  injectSessionMemories();
+  injectSceneHistory();
+  injectArcs();
+  injectCanon(characterName);
+  injectProfiles(characterName);
+  injectEpistemicKnowledge(characterName, characterName);
+  injectStateLedger();
+  maybeInjectUnified();
+  updateTokenDisplay();
+}
+
+// Minimum budget any tier will be reduced to during auto-tune, and the headroom
+// multiplier applied above actual demand so the next message doesn't immediately
+// hit the limit again.
+const AUTO_TUNE_FLOOR = 50;
+const AUTO_TUNE_HEADROOM = 1.15;
+
+// Maps each tunable tier to its settings key and DOM element IDs.
+// Short-term is excluded - it self-corrects via regeneration rather than budget tuning.
+const TUNABLE_TIERS = [
+  {
+    promptKey: PROMPT_KEY_LONG,
+    setting: 'longterm_inject_budget',
+    slider: 'sm_longterm_inject_budget',
+    display: 'sm_longterm_inject_budget_value',
+    fmt: (v) => String(v),
+  },
+  {
+    promptKey: PROMPT_KEY_SESSION,
+    setting: 'session_inject_budget',
+    slider: 'sm_session_inject_budget',
+    display: 'sm_session_inject_budget_value',
+    fmt: (v) => String(v),
+  },
+  {
+    promptKey: PROMPT_KEY_CANON,
+    setting: 'canon_inject_budget',
+    slider: 'sm_canon_inject_budget',
+    display: 'sm_canon_inject_budget_value',
+    fmt: (v) => String(v),
+  },
+  {
+    promptKey: PROMPT_KEY_SCENES,
+    setting: 'scene_inject_budget',
+    slider: 'sm_scene_inject_budget',
+    display: 'sm_scene_inject_budget_value',
+    fmt: (v) => String(v),
+  },
+  {
+    promptKey: PROMPT_KEY_ARCS,
+    setting: 'arcs_inject_budget',
+    slider: 'sm_arcs_inject_budget',
+    display: 'sm_arcs_inject_budget_value',
+    fmt: (v) => String(v),
+  },
+  {
+    promptKey: PROMPT_KEY_PROFILES,
+    setting: 'profiles_inject_budget',
+    slider: 'sm_profiles_inject_budget',
+    display: 'sm_profiles_inject_budget_value',
+    fmt: (v) => `${v} tokens`,
+  },
+  {
+    promptKey: PROMPT_KEY_RELATIONSHIPS,
+    setting: 'relationships_inject_budget',
+    slider: 'sm_relationships_inject_budget',
+    display: 'sm_relationships_inject_budget_value',
+    fmt: (v) => String(v),
+  },
+  {
+    promptKey: PROMPT_KEY_EPISTEMIC,
+    setting: 'epistemic_inject_budget',
+    slider: 'sm_epistemic_inject_budget',
+    display: 'sm_epistemic_inject_budget_value',
+    fmt: (v) => String(v),
+  },
+  {
+    promptKey: PROMPT_KEY_STATE_LEDGER,
+    setting: 'state_ledger_inject_budget',
+    slider: 'sm_state_ledger_inject_budget',
+    display: 'sm_state_ledger_inject_budget_value',
+    fmt: (v) => String(v),
+  },
+];
+
+/**
+ * Redistributes the per-tier token budget based on observed demand.
+ * Tiers reporting unused headroom give it to tiers that are trimming.
+ * The sum of all tier budgets never exceeds the current configured total.
+ *
+ * Only runs when `auto_tune_budgets` is enabled. Safe to call after every
+ * extraction pass - does nothing if no trim stats have been recorded yet
+ * or if no tier's demand has changed enough to warrant an update.
+ *
+ * @param {string|null} characterName - Active character (or group selection).
+ */
+export function autoTuneBudgets(characterName) {
+  const s = extension_settings[MODULE_NAME];
+  if (!s.auto_tune_budgets) return;
+
+  const snap = (v) => Math.max(AUTO_TUNE_FLOOR, Math.round(v / 50) * 50);
+
+  // Compute target budget for each tier from its actual demand.
+  // Tiers with no recorded stats (disabled or never injected) keep their
+  // current budget so they are not silently shrunk to the floor.
+  const targets = TUNABLE_TIERS.map((tier) => {
+    const stats = getTierTrimStats(tier.promptKey);
+    if (!stats || stats.full === 0) {
+      return { tier, budget: s[tier.setting] };
+    }
+    return { tier, budget: snap(stats.full * AUTO_TUNE_HEADROOM) };
+  });
+
+  // In simple mode the user has set an explicit total budget cap; honour it by
+  // scaling targets down if they exceed it. In advanced mode each tier slider
+  // is independent and there is no user-set total, so auto-tune sets each tier
+  // to exactly what it needs without a cap constraint.
+  if ((s.settings_mode ?? 'simple') === 'simple') {
+    const totalCap = totalBudgetFromSettings(s);
+    const totalTarget = targets.reduce((sum, t) => sum + t.budget, 0);
+    if (totalTarget > totalCap) {
+      const scale = totalCap / totalTarget;
+      for (const t of targets) {
+        t.budget = Math.max(snap(t.minimum ?? AUTO_TUNE_FLOOR), snap(t.budget * scale));
+      }
+    }
+  }
+
+  // Apply any changes and update DOM sliders.
+  let changed = false;
+  for (const { tier, budget } of targets) {
+    if (s[tier.setting] !== budget) {
+      s[tier.setting] = budget;
+      $(`#${tier.slider}`).val(budget);
+      $(`#${tier.display}`).text(tier.fmt(budget));
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    saveSettingsDebounced();
+    reinjectAfterBudgetChange(characterName);
+  }
 }
 
 /**
@@ -523,6 +770,7 @@ export function bindSettingsUI(ctrl) {
       extension_settings[MODULE_NAME].settings_mode = mode;
       saveSettingsDebounced();
       applySettingsMode(mode);
+      applyInjectionOverrideUI();
     });
 
   // ---- Simplified total budget slider ---------------------------------
@@ -533,7 +781,37 @@ export function bindSettingsUI(ctrl) {
       $('#sm_total_budget_value').text(total);
       applyTotalBudget(total, extension_settings[MODULE_NAME]);
       saveSettingsDebounced();
+      reinjectAfterBudgetChange(ctrl.getSelectedCharacterName());
     });
+
+  $('#sm_reset_budgets').on('click', function () {
+    const cur = extension_settings[MODULE_NAME];
+    const budgetKeys = [
+      'longterm_inject_budget',
+      'session_inject_budget',
+      'scene_inject_budget',
+      'arcs_inject_budget',
+      'canon_inject_budget',
+      'profiles_inject_budget',
+      'relationships_inject_budget',
+      'epistemic_inject_budget',
+      'state_ledger_inject_budget',
+    ];
+    for (const key of budgetKeys) {
+      cur[key] = defaultSettings[key];
+    }
+    // Sync all slider DOM elements to the restored values.
+    for (const { setting, slider, display, fmt } of TUNABLE_TIERS) {
+      $(`#${slider}`).val(cur[setting]);
+      $(`#${display}`).text(fmt(cur[setting]));
+    }
+    // Sync the simple-mode total slider.
+    const total = totalBudgetFromSettings(cur);
+    $('#sm_total_budget').val(total);
+    $('#sm_total_budget_value').text(total);
+    saveSettingsDebounced();
+    reinjectAfterBudgetChange(ctrl.getSelectedCharacterName());
+  });
 
   // Apply initial mode on load.
   applySettingsMode(s.settings_mode ?? 'simple');
@@ -543,6 +821,8 @@ export function bindSettingsUI(ctrl) {
     const selection = $(this).val() || null;
     ctrl.selectedGroupCharacter = selection;
     updateLongTermUI(ctrl.selectedGroupCharacter);
+    updateRelationshipHistoryUI(ctrl.selectedGroupCharacter);
+    updateEpistemicUI(ctrl.selectedGroupCharacter);
     updateSessionUI();
     updateFreshStartUI(isFreshStart());
     updateCanonUI(ctrl.selectedGroupCharacter);
@@ -765,6 +1045,122 @@ export function bindSettingsUI(ctrl) {
   updateProfileLabel();
   syncProfileGating();
 
+  // ---- Model test button --------------------------------------------------
+
+  $('#sm_model_test_btn').on('click', async function () {
+    const $btn = $(this);
+    const $result = $('#sm_model_test_result');
+
+    const resetBtn = () =>
+      $btn
+        .prop('disabled', false)
+        .html(
+          '<i class="fa-solid fa-flask"></i> <span>Test Extraction Model <span class="sm-info" data-tooltip="Runs a fixed test scenario through all extraction tiers. Use this to check whether your configured model is suitable for Smart Memory before committing to a session.">ⓘ</span></span>',
+        );
+
+    // If a test is already running, cancel it and give immediate feedback.
+    if (modelTestRunning) {
+      modelTestRunning = false;
+      stopGeneration();
+      $btn
+        .prop('disabled', true)
+        .html('<i class="fa-solid fa-spinner fa-spin"></i> <span>Cancelling...</span>');
+      $result
+        .show()
+        .html(
+          '<div class="sm_model_test_running"><i class="fa-solid fa-spinner fa-spin"></i> Cancelling extraction test...</div>',
+        );
+      return;
+    }
+
+    modelTestRunning = true;
+    $btn.html('<i class="fa-solid fa-circle-stop"></i> <span>Stop Testing</span>');
+    $result
+      .show()
+      .html(
+        '<div class="sm_model_test_running"><i class="fa-solid fa-spinner fa-spin"></i> Running extraction test...</div>',
+      );
+
+    let outcome;
+    try {
+      outcome = await runModelTest(() => !modelTestRunning);
+    } catch (err) {
+      console.error('[SmartMemory] Model test failed:', err);
+      $result.html(
+        '<div class="sm_model_test_fail"><i class="fa-solid fa-circle-xmark"></i> Test failed with an error. Check the browser console for details.</div>',
+      );
+      modelTestRunning = false;
+      resetBtn();
+      return;
+    }
+
+    modelTestRunning = false;
+    resetBtn();
+
+    if (outcome.cancelled) {
+      $result.html(
+        '<div class="sm_model_test_running"><i class="fa-solid fa-circle-xmark"></i> Test cancelled.</div>',
+      );
+      return;
+    }
+
+    if (outcome.failedTier) {
+      $result.html(
+        `<div class="sm_model_test_fail"><i class="fa-solid fa-circle-xmark"></i> <strong>${outcome.failedTier}</strong> returned no output. Your model may not be suitable for Smart Memory, or may need a stronger prompt style. Consider trying a different model.</div>`,
+      );
+      return;
+    }
+
+    // All tiers passed - render paginated tier review.
+    const tiers = outcome.tiers;
+    let current = 0;
+
+    $result.html(`
+      <div class="sm_model_test_pass_header">
+        <i class="fa-solid fa-circle-check"></i> All tiers returned output.
+      </div>
+      <div id="sm_model_test_tier_area"></div>
+    `);
+
+    function renderTier() {
+      const tier = tiers[current];
+      const sc = tier.scenario;
+      const scenarioLines = sc.messages.map((m) => `${m.name}: ${m.mes ?? m.text}`).join('\n');
+      const charactersNote = `Characters: ${sc.characters.join(', ')}`;
+      const readWarning = sc.showReadWarning
+        ? 'Read through this before judging - it is the only way to catch invented facts that look plausible.'
+        : 'Reference scenario for this tier.';
+      $('#sm_model_test_tier_area').html(`
+        <div class="sm_model_test_tier_name">${tier.name} <span class="sm_model_test_tier_pos">${current + 1} / ${tiers.length}</span></div>
+        <details class="sm_model_test_scenario">
+          <summary>View test scenario</summary>
+          <p class="sm_model_test_scenario_note">${charactersNote}. ${readWarning}</p>
+          <textarea class="sm_model_test_output text_pole" readonly>${scenarioLines}</textarea>
+        </details>
+        <div class="sm_model_test_tier_hint">${tier.hint}</div>
+        <textarea class="sm_model_test_output text_pole" readonly>${tier.items.join('\n')}</textarea>
+        <div class="sm_model_test_nav">
+          <button class="menu_button sm_model_test_prev"${current === 0 ? ' disabled' : ''}>&#8592; Previous</button>
+          <button class="menu_button sm_model_test_next"${current === tiers.length - 1 ? ' disabled' : ''}>Next &#8594;</button>
+        </div>
+      `);
+      $result.find('.sm_model_test_prev').on('click', () => {
+        if (current > 0) {
+          current--;
+          renderTier();
+        }
+      });
+      $result.find('.sm_model_test_next').on('click', () => {
+        if (current < tiers.length - 1) {
+          current++;
+          renderTier();
+        }
+      });
+    }
+
+    renderTier();
+  });
+
   $('#sm_extraction_frequency')
     .val(s.extraction_frequency ?? 'medium')
     .on('change', function () {
@@ -860,6 +1256,7 @@ export function bindSettingsUI(ctrl) {
       extension_settings[MODULE_NAME].canon_inject_budget = val;
       $('#sm_canon_inject_budget_value').text(val);
       saveSettingsDebounced();
+      reinjectAfterBudgetChange(ctrl.getSelectedCharacterName());
     });
   $('#sm_canon_inject_budget_value').text(s.canon_inject_budget);
 
@@ -908,7 +1305,7 @@ export function bindSettingsUI(ctrl) {
     if (isCatchUpRunning()) return;
     if (ctrl.compactionRunning) return;
     ctrl.compactionRunning = true;
-    setStatusMessage('Generating summary...');
+    setStatusMessage('Extracting short-term memories...');
     $(this).prop('disabled', true);
     try {
       const summary = await runCompaction();
@@ -1077,6 +1474,20 @@ export function bindSettingsUI(ctrl) {
       saveSettingsDebounced();
     });
 
+  $('#sm_longterm_triggered_depth')
+    .val(s.longterm_triggered_depth ?? 4)
+    .on('change', function () {
+      extension_settings[MODULE_NAME].longterm_triggered_depth = parseInt($(this).val(), 10);
+      saveSettingsDebounced();
+    });
+
+  $('#sm_longterm_triggers_enabled')
+    .prop('checked', s.longterm_triggers_enabled ?? false)
+    .on('change', function () {
+      extension_settings[MODULE_NAME].longterm_triggers_enabled = $(this).prop('checked');
+      saveSettingsDebounced();
+    });
+
   $('#sm_longterm_inject_budget_value').text(s.longterm_inject_budget ?? 500);
   $('#sm_longterm_inject_budget')
     .val(s.longterm_inject_budget ?? 500)
@@ -1085,7 +1496,322 @@ export function bindSettingsUI(ctrl) {
       extension_settings[MODULE_NAME].longterm_inject_budget = v;
       $('#sm_longterm_inject_budget_value').text(v);
       saveSettingsDebounced();
+      reinjectAfterBudgetChange(ctrl.getSelectedCharacterName());
     });
+
+  // ---- Relationship history controls ------------------------------------
+  $('#sm_relationships_enabled')
+    .prop('checked', s.relationships_enabled ?? true)
+    .on('change', function () {
+      extension_settings[MODULE_NAME].relationships_enabled = $(this).prop('checked');
+      saveSettingsDebounced();
+      const characterName = ctrl.getSelectedCharacterName();
+      injectRelationshipHistory(characterName);
+    });
+
+  $('#sm_relationships_inject_budget_value').text(s.relationships_inject_budget ?? 250);
+  $('#sm_relationships_inject_budget')
+    .val(s.relationships_inject_budget ?? 250)
+    .on('input', function () {
+      const v = parseInt($(this).val(), 10);
+      extension_settings[MODULE_NAME].relationships_inject_budget = v;
+      $('#sm_relationships_inject_budget_value').text(v);
+      saveSettingsDebounced();
+      reinjectAfterBudgetChange(ctrl.getSelectedCharacterName());
+    });
+
+  $(`input[name="sm_relationships_position"][value="${s.relationships_position ?? 1}"]`).prop(
+    'checked',
+    true,
+  );
+  $('input[name="sm_relationships_position"]').on('change', function () {
+    extension_settings[MODULE_NAME].relationships_position = parseInt($(this).val(), 10);
+    saveSettingsDebounced();
+  });
+
+  $('#sm_relationships_depth')
+    .val(s.relationships_depth ?? 5)
+    .on('input', function () {
+      extension_settings[MODULE_NAME].relationships_depth = parseInt($(this).val(), 10);
+      saveSettingsDebounced();
+    });
+
+  $('#sm_relationships_role')
+    .val(s.relationships_role ?? 0)
+    .on('change', function () {
+      extension_settings[MODULE_NAME].relationships_role = parseInt($(this).val(), 10);
+      saveSettingsDebounced();
+    });
+
+  // ---- Relationship history panel buttons -----------------------------
+  $('#sm_add_relationship').on('click', function () {
+    $('#sm_relationship_add_form').removeData('editing').show();
+    $('#sm_rel_subject').val('').focus();
+    $('#sm_rel_target').val('');
+    $('#sm_rel_descriptors').val('');
+  });
+
+  $('#sm_rel_cancel').on('click', function () {
+    $('#sm_relationship_add_form').removeData('editing').hide();
+  });
+
+  $('#sm_rel_save').on('click', function () {
+    const characterName = ctrl.getSelectedCharacterName();
+    if (!characterName) return;
+
+    const subject = $('#sm_rel_subject').val().trim();
+    const target = $('#sm_rel_target').val().trim();
+    const descriptorsRaw = $('#sm_rel_descriptors').val().trim();
+
+    if (!subject || !target || !descriptorsRaw) return;
+
+    // Parse "word(magnitude), word(magnitude)" format. Words without an explicit
+    // magnitude get the default "medium".
+    const VALID_MAGNITUDES = new Set(['low', 'medium', 'high']);
+    const descriptors = descriptorsRaw
+      .split(',')
+      .map((t) => t.trim())
+      .filter((t) => t.length > 0)
+      .map((t) => {
+        const m = /\((\s*low|medium|high\s*)\)/i.exec(t);
+        const magnitude = m ? m[1].trim().toLowerCase() : 'medium';
+        const word = t
+          .replace(/\([^)]*\)/g, '')
+          .replace(/[^a-z\s-]/gi, '')
+          .trim()
+          .toLowerCase();
+        return VALID_MAGNITUDES.has(word) ? null : { word, magnitude };
+      })
+      .filter(Boolean);
+
+    if (descriptors.length === 0) return;
+    const key = `${subject}→${target}`;
+
+    const h = loadRelationshipHistory(characterName);
+
+    // If editing an existing pair under a different key, remove the old entry.
+    const editingKey = $('#sm_relationship_add_form').data('editing');
+    if (editingKey && editingKey !== key) delete h[editingKey];
+
+    h[key] = { descriptors, updatedAt: Date.now() };
+    saveRelationshipHistory(characterName, h);
+    saveSettingsDebounced();
+    injectRelationshipHistory(characterName);
+    updateRelationshipHistoryUI(characterName);
+    $('#sm_relationship_add_form').removeData('editing').hide();
+  });
+
+  $('#sm_clear_relationships').on('click', async function () {
+    const characterName = ctrl.getSelectedCharacterName();
+    if (!characterName) return;
+    if (
+      !(await callGenericPopup(
+        `Clear all relationship history for "${characterName}"?`,
+        POPUP_TYPE.CONFIRM,
+      ))
+    )
+      return;
+    clearRelationshipHistory(characterName);
+    saveSettingsDebounced();
+    injectRelationshipHistory(null);
+    updateRelationshipHistoryUI(characterName);
+  });
+
+  // ---- Perspectives & Secrets bindings -----------------------------------
+
+  $('#sm_epistemic_enabled')
+    .prop('checked', s.epistemic_enabled ?? true)
+    .on('change', async function () {
+      const enabling = $(this).prop('checked');
+      if (enabling && getHardwareProfile() === 'a') {
+        const confirmed = await callGenericPopup(
+          'Perspectives & Secrets works best with a cloud-based LLM or a strong capable local model (e.g. Gemma 4).\n\nWeaker models may produce low-quality extractions. Use the model test in the Configuration section to check whether your model is up to the task.',
+          POPUP_TYPE.CONFIRM,
+          '',
+          { okButton: 'I understand', cancelButton: 'Cancel' },
+        );
+        if (!confirmed) {
+          $(this).prop('checked', false);
+          return;
+        }
+      }
+      extension_settings[MODULE_NAME].epistemic_enabled = enabling;
+      saveSettingsDebounced();
+      const characterName = ctrl.getSelectedCharacterName();
+      injectEpistemicKnowledge(characterName, characterName);
+    });
+
+  $('#sm_epistemic_inject_unaware')
+    .prop('checked', s.epistemic_inject_unaware ?? true)
+    .on('change', function () {
+      extension_settings[MODULE_NAME].epistemic_inject_unaware = $(this).prop('checked');
+      saveSettingsDebounced();
+    });
+
+  $('#sm_epistemic_secondhand_framing')
+    .prop('checked', s.epistemic_secondhand_framing ?? true)
+    .on('change', function () {
+      extension_settings[MODULE_NAME].epistemic_secondhand_framing = $(this).prop('checked');
+      saveSettingsDebounced();
+    });
+
+  $('#sm_epistemic_inject_budget_value').text(s.epistemic_inject_budget ?? 200);
+  $('#sm_epistemic_inject_budget')
+    .val(s.epistemic_inject_budget ?? 200)
+    .on('input', function () {
+      const v = parseInt($(this).val(), 10);
+      extension_settings[MODULE_NAME].epistemic_inject_budget = v;
+      $('#sm_epistemic_inject_budget_value').text(v);
+      saveSettingsDebounced();
+      reinjectAfterBudgetChange(ctrl.getSelectedCharacterName());
+    });
+
+  $(`input[name="sm_epistemic_position"][value="${s.epistemic_position ?? 1}"]`).prop(
+    'checked',
+    true,
+  );
+  $('input[name="sm_epistemic_position"]').on('change', function () {
+    extension_settings[MODULE_NAME].epistemic_position = parseInt($(this).val(), 10);
+    saveSettingsDebounced();
+  });
+
+  $('#sm_epistemic_depth')
+    .val(s.epistemic_depth ?? 1)
+    .on('input', function () {
+      extension_settings[MODULE_NAME].epistemic_depth = parseInt($(this).val(), 10);
+      saveSettingsDebounced();
+    });
+
+  $('#sm_epistemic_role')
+    .val(s.epistemic_role ?? 0)
+    .on('change', function () {
+      extension_settings[MODULE_NAME].epistemic_role = parseInt($(this).val(), 10);
+      saveSettingsDebounced();
+    });
+
+  // ---- State Ledger bindings ---------------------------------------------
+
+  $('#sm_state_ledger_enabled')
+    .prop('checked', s.state_ledger_enabled ?? false)
+    .on('change', async function () {
+      const enabling = $(this).prop('checked');
+      if (enabling && getHardwareProfile() === 'a') {
+        const confirmed = await callGenericPopup(
+          'State Ledger works best with a cloud-based LLM or a strong capable local model (e.g. Gemma 4).\n\nWeaker models may invent field values that are not in the scene, producing inaccurate entity state. Use the model test in the Configuration section to check whether your model is up to the task.',
+          POPUP_TYPE.CONFIRM,
+          '',
+          { okButton: 'I understand', cancelButton: 'Cancel' },
+        );
+        if (!confirmed) {
+          $(this).prop('checked', false);
+          return;
+        }
+      }
+      extension_settings[MODULE_NAME].state_ledger_enabled = enabling;
+      saveSettingsDebounced();
+      injectStateLedger();
+    });
+
+  $('#sm_state_ledger_inject_budget_value').text(s.state_ledger_inject_budget ?? 200);
+  $('#sm_state_ledger_inject_budget')
+    .val(s.state_ledger_inject_budget ?? 200)
+    .on('input', function () {
+      const v = parseInt($(this).val(), 10);
+      extension_settings[MODULE_NAME].state_ledger_inject_budget = v;
+      $('#sm_state_ledger_inject_budget_value').text(v);
+      saveSettingsDebounced();
+      reinjectAfterBudgetChange(ctrl.getSelectedCharacterName());
+    });
+
+  $(`input[name="sm_state_ledger_position"][value="${s.state_ledger_position ?? 1}"]`).prop(
+    'checked',
+    true,
+  );
+  $('input[name="sm_state_ledger_position"]').on('change', function () {
+    extension_settings[MODULE_NAME].state_ledger_position = parseInt($(this).val(), 10);
+    saveSettingsDebounced();
+  });
+
+  $('#sm_state_ledger_depth')
+    .val(s.state_ledger_depth ?? 1)
+    .on('input', function () {
+      extension_settings[MODULE_NAME].state_ledger_depth = parseInt($(this).val(), 10);
+      saveSettingsDebounced();
+    });
+
+  $('#sm_state_ledger_role')
+    .val(s.state_ledger_role ?? 0)
+    .on('change', function () {
+      extension_settings[MODULE_NAME].state_ledger_role = parseInt($(this).val(), 10);
+      saveSettingsDebounced();
+    });
+
+  // Show/hide the target field when type changes to/from "hiding".
+  $('#sm_ep_type').on('change', function () {
+    $('.sm_ep_target_field').toggle($(this).val() === 'hiding');
+  });
+
+  $('#sm_epistemic_add').on('click', function () {
+    $('#sm_ep_type').val('knows');
+    $('#sm_ep_subject').val('');
+    $('#sm_ep_target').val('');
+    $('#sm_ep_content').val('');
+    $('.sm_ep_target_field').hide();
+    $('#sm_epistemic_add_form').removeData('editing').show();
+    $('#sm_ep_subject').focus();
+  });
+
+  $('#sm_ep_cancel').on('click', function () {
+    $('#sm_epistemic_add_form').removeData('editing').hide();
+  });
+
+  $('#sm_ep_save').on('click', function () {
+    const characterName = ctrl.getSelectedCharacterName();
+    if (!characterName) return;
+
+    const type = $('#sm_ep_type').val();
+    const subject = $('#sm_ep_subject').val().trim();
+    const target = type === 'hiding' ? $('#sm_ep_target').val().trim() : '';
+    const content = $('#sm_ep_content').val().trim();
+
+    if (!subject || !content) return;
+    if (type === 'hiding' && !target) return;
+
+    const entries = loadEpistemicKnowledge(characterName);
+    const editingId = $('#sm_epistemic_add_form').data('editing');
+
+    if (editingId) {
+      // Update the existing entry in place.
+      const idx = entries.findIndex((e) => e.id === editingId);
+      if (idx !== -1) {
+        entries[idx] = { ...entries[idx], type, subject, target, content };
+      }
+    } else {
+      entries.push({ id: generateMemoryId(), type, subject, target, content, ts: Date.now() });
+    }
+
+    saveEpistemicKnowledge(characterName, entries);
+    injectEpistemicKnowledge(characterName, characterName);
+    updateEpistemicUI(characterName);
+    updateTokenDisplay();
+    $('#sm_epistemic_add_form').removeData('editing').hide();
+  });
+
+  $('#sm_epistemic_clear').on('click', async function () {
+    const characterName = ctrl.getSelectedCharacterName();
+    if (!characterName) return;
+    if (
+      !(await callGenericPopup(
+        `Clear all Perspectives & Secrets entries for "${characterName}"?`,
+        POPUP_TYPE.CONFIRM,
+      ))
+    )
+      return;
+    clearEpistemicKnowledge(characterName);
+    injectEpistemicKnowledge(null, null);
+    updateEpistemicUI(characterName);
+    updateTokenDisplay();
+  });
 
   $('#sm_read_only').on('change', async function () {
     const val = $(this).prop('checked');
@@ -1146,17 +1872,19 @@ export function bindSettingsUI(ctrl) {
     if (!characterName) return;
     ctrl.extractionRunning = true;
     $(this).prop('disabled', true);
-    setStatusMessage('Extracting memories...');
+    setStatusMessage(`Extracting memories for ${characterName}...`);
     try {
       const context = getContext();
       const recentMessages = ctrl.getStableExtractionWindowWithFallback(context.chat, 20);
-      const count = await extractAndStoreMemories(characterName, recentMessages);
+      const count = await extractAndStoreMemories(characterName, recentMessages, setStatusMessage);
       saveSettingsDebounced();
       updateLongTermUI(characterName);
+      updateRelationshipHistoryUI(characterName);
+      updateEpistemicUI(characterName);
       setStatusMessage(
         count > 0
-          ? `${count} new memor${count === 1 ? 'y' : 'ies'} saved.`
-          : 'No new memories found.',
+          ? `${count} new memor${count === 1 ? 'y' : 'ies'} saved for ${characterName}.`
+          : `No new memories found for ${characterName}.`,
       );
     } catch (err) {
       showError('Memory extraction', err);
@@ -1174,11 +1902,18 @@ export function bindSettingsUI(ctrl) {
     if (!(await callGenericPopup(`Clear all memories for "${characterName}"?`, POPUP_TYPE.CONFIRM)))
       return;
     clearCharacterMemories(characterName);
+    clearRelationshipHistory(characterName);
+    clearEpistemicKnowledge(characterName);
     clearCanon(characterName);
     saveSettingsDebounced();
     updateLongTermUI(characterName);
     updateCanonUI(characterName);
+    updateRelationshipHistoryUI(characterName);
+    updateEpistemicUI(characterName);
     injectMemories(null).catch(console.error);
+    injectRelationshipHistory(null);
+    injectEpistemicKnowledge(null, null);
+    injectStateLedger();
     setStatusMessage('Memories cleared.');
   });
 
@@ -1246,6 +1981,7 @@ export function bindSettingsUI(ctrl) {
       extension_settings[MODULE_NAME].session_inject_budget = v;
       $('#sm_session_inject_budget_value').text(v);
       saveSettingsDebounced();
+      reinjectAfterBudgetChange(ctrl.getSelectedCharacterName());
     });
 
   $('#sm_extract_session_now').on('click', async function () {
@@ -1279,7 +2015,9 @@ export function bindSettingsUI(ctrl) {
       return;
     await clearSessionMemories();
     await clearSessionEntityRegistry();
+    await clearStateLedger();
     injectSessionMemories();
+    injectStateLedger();
     updateSessionUI();
     setStatusMessage('Session memories cleared.');
   });
@@ -1338,6 +2076,7 @@ export function bindSettingsUI(ctrl) {
       extension_settings[MODULE_NAME].scene_inject_budget = v;
       $('#sm_scene_inject_budget_value').text(v);
       saveSettingsDebounced();
+      reinjectAfterBudgetChange(ctrl.getSelectedCharacterName());
     });
 
   $('#sm_extract_scenes_now').on('click', async function () {
@@ -1432,6 +2171,7 @@ export function bindSettingsUI(ctrl) {
       extension_settings[MODULE_NAME].arcs_inject_budget = v;
       $('#sm_arcs_inject_budget_value').text(v);
       saveSettingsDebounced();
+      reinjectAfterBudgetChange(ctrl.getSelectedCharacterName());
     });
 
   $('#sm_extract_arcs_now').on('click', async function () {
@@ -1621,7 +2361,7 @@ export function bindSettingsUI(ctrl) {
             setStatusMessage(
               `Catching up... (${i}/${total} messages - extracting long-term for ${name})`,
             );
-            await extractAndStoreMemories(name, nameChunk).catch((err) => {
+            await extractAndStoreMemories(name, nameChunk, setStatusMessage).catch((err) => {
               console.error('[SmartMemory] Catch-up long-term extraction error (chunk):', err);
             });
             // Consolidate after each chunk so near-duplicates are collapsed before
@@ -1650,6 +2390,12 @@ export function bindSettingsUI(ctrl) {
             console.error('[SmartMemory] Catch-up arc extraction error (chunk):', err);
           });
         }
+        if (isStateLedgerEnabled() && !isFreshStart()) {
+          setStatusMessage(`Catching up... (${i}/${total} messages - updating state ledger)`);
+          await runStateCardExtraction(characterName, chunk).catch((err) => {
+            console.error('[SmartMemory] Catch-up state ledger extraction error (chunk):', err);
+          });
+        }
 
         // Re-inject after each chunk so the token display reflects what is
         // actually stored, not just what was injected before catch-up started.
@@ -1662,6 +2408,9 @@ export function bindSettingsUI(ctrl) {
         if (settings.arcs_enabled) {
           injectArcs();
         }
+        if (settings.relationships_enabled) {
+          injectRelationshipHistory(characterName);
+        }
 
         // Update progress and token display after each chunk so the user can
         // see memories accumulating in real time rather than only at the end.
@@ -1672,16 +2421,17 @@ export function bindSettingsUI(ctrl) {
       }
 
       if (!ctrl.catchUpCancelled) {
-        // Scene: walk through the full chat using heuristic break detection,
-        // summarizing each detected scene. AI detection is skipped here - it
-        // would cost one model call per message across potentially hundreds of
-        // messages. The heuristic is free and good enough for bulk processing.
+        // Scene: walk through the full chat detecting and summarizing scenes.
+        // When scene_ai_detect is enabled, AI detection runs on each AI message
+        // (matching normal flow). When disabled, the heuristic is used instead.
         if (settings.scene_enabled) {
-          setStatusMessage('Detecting and summarizing scenes...');
+          setStatusMessage('Detecting scene breaks...');
           const sceneHistory = loadSceneHistory();
           const max = settings.scene_max_history ?? 5;
           const minMessages = settings.scene_min_messages ?? 3;
           let sceneBuffer = [];
+          let sceneCount = 0;
+          let prevAiMsg = '';
 
           /**
            * Deduplicates a candidate summary against the last three stored scenes,
@@ -1698,12 +2448,31 @@ export function bindSettingsUI(ctrl) {
             return false;
           };
 
-          for (const msg of allMessages) {
+          for (let msgIdx = 0; msgIdx < allMessages.length; msgIdx++) {
             if (ctrl.catchUpCancelled) break;
+            const msg = allMessages[msgIdx];
             sceneBuffer.push(msg);
 
             const msgText = msg.mes ?? '';
-            if (detectSceneBreakHeuristic(msgText) && sceneBuffer.length >= minMessages) {
+            const isAiMsg = !msg.is_user;
+
+            if (isAiMsg && settings.scene_ai_detect) {
+              setStatusMessage(`Detecting scene breaks... (${msgIdx + 1}/${allMessages.length})`);
+            }
+
+            // AI detection only runs on AI messages - user messages are skipped,
+            // matching the behaviour of the normal CHARACTER_MESSAGE_RENDERED path.
+            const isBreak = settings.scene_ai_detect
+              ? isAiMsg &&
+                sceneBuffer.length >= minMessages &&
+                (await detectSceneBreakAI(msgText, prevAiMsg))
+              : detectSceneBreakHeuristic(msgText) && sceneBuffer.length >= minMessages;
+
+            if (isAiMsg) prevAiMsg = msgText;
+
+            if (isBreak) {
+              sceneCount++;
+              setStatusMessage(`Summarizing scene ${sceneCount}...`);
               const sceneSummary = await summarizeScene(sceneBuffer).catch((err) => {
                 console.error('[SmartMemory] Catch-up scene summary failed:', err);
                 return null;
@@ -1715,6 +2484,14 @@ export function bindSettingsUI(ctrl) {
                   source_memory_ids: [],
                 });
                 if (sceneHistory.length > max) sceneHistory.splice(0, sceneHistory.length - max);
+              }
+              if (isEpistemicEnabled() && !isFreshStart()) {
+                setStatusMessage(
+                  `Summarizing scene ${sceneCount}... (extracting epistemic knowledge)`,
+                );
+                await extractEpistemicKnowledge(sceneBuffer, characterName).catch((err) => {
+                  console.error('[SmartMemory] Catch-up epistemic extraction error:', err);
+                });
               }
               sceneBuffer = [];
             }
@@ -1729,6 +2506,12 @@ export function bindSettingsUI(ctrl) {
             if (sceneSummary && !(await isDuplicateScene(sceneSummary))) {
               sceneHistory.push({ summary: sceneSummary, ts: Date.now(), source_memory_ids: [] });
               if (sceneHistory.length > max) sceneHistory.splice(0, sceneHistory.length - max);
+            }
+            if (isEpistemicEnabled() && !isFreshStart()) {
+              setStatusMessage('Extracting epistemic knowledge from final scene...');
+              await extractEpistemicKnowledge(sceneBuffer, characterName).catch((err) => {
+                console.error('[SmartMemory] Catch-up epistemic extraction error (final):', err);
+              });
             }
           }
 
@@ -1763,7 +2546,7 @@ export function bindSettingsUI(ctrl) {
         // Short-term compaction runs once at the end - it uses the real token
         // count to decide what to include, so chunking doesn't apply.
         if (settings.compaction_enabled) {
-          setStatusMessage('Generating summary...');
+          setStatusMessage('Extracting short-term memories...');
           await runCompaction({ includeLastMessage: true })
             .then((summary) => {
               if (summary) {
@@ -1804,16 +2587,25 @@ export function bindSettingsUI(ctrl) {
       // Re-inject and refresh UI for everything processed so far, whether the
       // run completed or was cancelled partway through.
       await injectMemories(characterName);
+      injectRelationshipHistory(characterName);
       injectSessionMemories();
       injectSceneHistory();
       injectArcs();
+      injectStateLedger();
+      // Reset the warn flag so the catch-up final inject can prompt if needed,
+      // then pass warn=true so a single exact-fit dialog fires if the full list
+      // exceeds the current budget.
+      resetEpistemicWarnFlag();
+      injectEpistemicKnowledge(characterName, characterName, false, true, true);
       injectProfiles(characterName);
+      updateEntityPanel(characterName);
       updateLongTermUI(characterName);
+      updateRelationshipHistoryUI(characterName);
+      updateEpistemicUI(characterName);
       updateSessionUI();
       updateScenesUI();
       updateArcsUI();
       updateProfilesUI(loadProfiles(characterName));
-      updateEntityPanel(characterName);
       maybeInjectUnified();
       updateTokenDisplay();
       saveSettingsDebounced();
@@ -1854,7 +2646,7 @@ export function bindSettingsUI(ctrl) {
     if (isCatchUpRunning()) return;
     if (
       !(await callGenericPopup(
-        'Clear all Smart Memory context for this chat?\n\nThis will erase the summary, session memories, scene history, and story arcs. Long-term memories are not affected.',
+        'Clear all Smart Memory context for this chat?\n\nPerspectives & Secrets entries are also cleared.\nLong-term memories, relationship history, state cards, canon, and pinned arcs are not affected.',
         POPUP_TYPE.CONFIRM,
       ))
     )
@@ -1876,6 +2668,7 @@ export function bindSettingsUI(ctrl) {
     await clearArcs();
     await clearArcSummaries();
     await clearProfiles();
+    clearEpistemicKnowledge(characterName);
     await context.saveMetadata();
 
     // Clearing chatMetadata means loadAndInjectSummary will clear the slot.
@@ -1884,8 +2677,11 @@ export function bindSettingsUI(ctrl) {
     injectSceneHistory();
     injectArcs();
     injectProfiles(characterName);
+    injectStateLedger();
+    injectEpistemicKnowledge(characterName, characterName);
 
     updateShortTermUI(null);
+    updateEpistemicUI(characterName);
     updateSessionUI();
     updateScenesUI();
     updateArcsUI();
@@ -1904,15 +2700,17 @@ export function bindSettingsUI(ctrl) {
     const nameLabel = characterName ? `"${characterName}"` : 'this character';
     if (
       !(await callGenericPopup(
-        `Fresh Start - this will permanently delete all long-term memories for ${nameLabel} and clear all Smart Memory context for this chat.\n\nThis cannot be undone. Continue?`,
+        `Fresh Start for ${nameLabel} - this will permanently delete all Smart Memory data for this character and chat.\n\nThis cannot be undone. Continue?`,
         POPUP_TYPE.CONFIRM,
       ))
     )
       return;
 
-    // Clear long-term memories and canon for the character.
+    // Clear long-term memories, relationship history, epistemic knowledge, and canon for the character.
     if (characterName) {
       clearCharacterMemories(characterName);
+      clearRelationshipHistory(characterName);
+      clearEpistemicKnowledge(characterName);
       clearCanon(characterName);
       saveSettingsDebounced();
     }
@@ -1931,6 +2729,7 @@ export function bindSettingsUI(ctrl) {
     await clearArcs();
     await clearArcSummaries();
     await clearProfiles(characterName);
+    await clearStateLedger();
     // Dismiss any open recap modal.
     $('#sm_recap_overlay').remove();
 
@@ -1943,9 +2742,12 @@ export function bindSettingsUI(ctrl) {
     injectSceneHistory();
     injectArcs();
     injectProfiles(characterName);
+    injectStateLedger();
 
     updateShortTermUI(null);
     updateLongTermUI(characterName);
+    updateRelationshipHistoryUI(characterName);
+    updateEpistemicUI(characterName);
     updateFreshStartUI(isFreshStart());
     updateSessionUI();
     updateScenesUI();
@@ -2175,7 +2977,7 @@ export function bindSettingsUI(ctrl) {
       extension_settings[MODULE_NAME].profiles_inject_budget = val;
       $profilesBudgetVal.text(val + ' tokens');
       saveSettingsDebounced();
-      injectProfiles(ctrl.getSelectedCharacterName());
+      reinjectAfterBudgetChange(ctrl.getSelectedCharacterName());
     });
   $profilesBudgetVal.text((s.profiles_inject_budget ?? 400) + ' tokens');
 
@@ -2241,12 +3043,41 @@ export function bindSettingsUI(ctrl) {
       saveSettingsDebounced();
     });
 
+  $('#sm_auto_tune_budgets')
+    .prop('checked', s.auto_tune_budgets ?? false)
+    .on('change', function () {
+      extension_settings[MODULE_NAME].auto_tune_budgets = $(this).prop('checked');
+      saveSettingsDebounced();
+    });
+
+  // Hides per-tier injection position/depth/role blocks when either unified
+  // injection or macro mode is active - those controls have no effect in either mode.
+  // Budget and template blocks stay visible: they still affect content trimming and
+  // formatting even when placement is handled externally.
+  function applyInjectionOverrideUI() {
+    const cur = extension_settings[MODULE_NAME];
+    const unified = cur.unified_injection ?? false;
+    const macros = cur.macros_enabled ?? false;
+    const hide = unified || macros;
+    const advanced = (cur.settings_mode ?? 'simple') === 'advanced';
+    // Per-tier position/depth/role blocks are advanced-only and hidden by override modes.
+    // Both conditions must be met to show them: advanced mode on and no override active.
+    // Exclude sm_unified_position - it belongs to the unified block's own settings.
+    $('[name$="_position"]:not([name="sm_unified_position"]), #sm_longterm_triggered_depth')
+      .closest('.sm-block')
+      .toggle(!hide && advanced);
+    // Unified sub-settings are only relevant when unified injection is on,
+    // macro mode is off, and advanced mode is active.
+    $('#sm_unified_settings').toggle(unified && !macros && advanced);
+  }
+
   $('#sm_unified_injection')
     .prop('checked', s.unified_injection ?? false)
     .on('change', function () {
       const enabled = $(this).prop('checked');
       extension_settings[MODULE_NAME].unified_injection = enabled;
       saveSettingsDebounced();
+      applyInjectionOverrideUI();
       if (enabled) {
         injectUnified();
       } else {
@@ -2265,6 +3096,40 @@ export function bindSettingsUI(ctrl) {
       }
       updateTokenDisplay();
     });
+  $('[name="sm_unified_position"]')
+    .filter(`[value="${s.unified_position ?? 2}"]`)
+    .prop('checked', true);
+  $('[name="sm_unified_position"]').on('change', function () {
+    extension_settings[MODULE_NAME].unified_position = Number($(this).val());
+    saveSettingsDebounced();
+    maybeInjectUnified();
+  });
+
+  $('#sm_unified_depth')
+    .val(s.unified_depth ?? 0)
+    .on('change', function () {
+      extension_settings[MODULE_NAME].unified_depth = Number($(this).val());
+      saveSettingsDebounced();
+      maybeInjectUnified();
+    });
+
+  $('#sm_unified_role')
+    .val(s.unified_role ?? 0)
+    .on('change', function () {
+      extension_settings[MODULE_NAME].unified_role = Number($(this).val());
+      saveSettingsDebounced();
+      maybeInjectUnified();
+    });
+
+  $('#sm_macros_enabled')
+    .prop('checked', s.macros_enabled ?? false)
+    .on('change', function () {
+      const enabled = $(this).prop('checked');
+      extension_settings[MODULE_NAME].macros_enabled = enabled;
+      saveSettingsDebounced();
+      applyInjectionOverrideUI();
+    });
+  applyInjectionOverrideUI();
 
   $('#sm_check_continuity').on('click', async function () {
     const characterName = ctrl.getSelectedCharacterName();

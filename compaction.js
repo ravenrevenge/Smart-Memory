@@ -44,6 +44,8 @@ import { formatSummary } from './parsers.js';
 import { loadCharacterMemories } from './longterm.js';
 import { loadSessionMemories } from './session.js';
 import { invalidateUnifiedCache } from './unified-inject.js';
+import { MACRO_NAMES, setMacroContent, isMacroActive } from './macros.js';
+import { reportTierTrimStats } from './trim-stats.js';
 
 /**
  * Counts tokens across all non-system chat messages.
@@ -222,6 +224,7 @@ export async function runCompaction({ includeLastMessage = false } = {}) {
 export function injectSummary(summary) {
   const settings = extension_settings[MODULE_NAME];
   if (!settings.compaction_enabled || !summary) {
+    setMacroContent(MACRO_NAMES.shortterm, '');
     setExtensionPrompt(PROMPT_KEY_SHORT, '', extension_prompt_types.NONE, 0);
     invalidateUnifiedCache(PROMPT_KEY_SHORT);
     return;
@@ -233,6 +236,7 @@ export function injectSummary(summary) {
   const budget = settings.compaction_response_length ?? 2000;
   let summaryText = summary;
   const tokenCount = estimateTokens(summaryText);
+  const fullTokens = tokenCount;
   if (tokenCount > budget) {
     const ratio = budget / tokenCount;
     const sliceAt = Math.floor(summaryText.length * ratio);
@@ -246,6 +250,14 @@ export function injectSummary(summary) {
 
   const template = settings.compaction_template || 'Story so far:\n{{summary}}';
   const content = template.replace('{{summary}}', summaryText);
+  reportTierTrimStats(PROMPT_KEY_SHORT, estimateTokens(content), fullTokens);
+
+  setMacroContent(MACRO_NAMES.shortterm, content);
+  if (isMacroActive(MACRO_NAMES.shortterm)) {
+    setExtensionPrompt(PROMPT_KEY_SHORT, '', extension_prompt_types.NONE, 0);
+    invalidateUnifiedCache(PROMPT_KEY_SHORT);
+    return;
+  }
 
   setExtensionPrompt(
     PROMPT_KEY_SHORT,
@@ -269,6 +281,7 @@ export function loadAndInjectSummary() {
   if (summary) {
     injectSummary(summary);
   } else {
+    setMacroContent(MACRO_NAMES.shortterm, '');
     setExtensionPrompt(PROMPT_KEY_SHORT, '', extension_prompt_types.NONE, 0);
     invalidateUnifiedCache(PROMPT_KEY_SHORT);
   }

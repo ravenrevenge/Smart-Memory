@@ -25,10 +25,13 @@
  * reconcileTypeEntries      - merges promoted consolidation entries into a base, replacing overlapping originals
  * sortByTimeline            - sorts memories by timestamp (oldest to newest) for timeline-friendly injection
  * extractTurnEntityMentions - lightweight regex extraction of proper-noun candidates from last messages
+ * keywordSet                - returns the set of significant (3+ char, non-stopword) lowercase tokens from a string
+ * deriveTriggers            - extracts keyword trigger candidates from a memory's content string (Profile B write path)
+ * filterTriggersByFrequency - drops triggers that appear in more than `threshold` fraction of all memories
  * hybridScore               - weighted blend of utility, entity overlap, arc relevance, temporal proximity,
- *                             and w5 turn similarity (cosine sim to last AI turn text)
+ *                             w5 turn similarity, and contextual relevance bonus (content-word overlap + LLM triggers)
  * hybridPrioritize          - sorts a memory array by hybridScore then applies a diversity floor;
- *                             accepts embedFn, lastTurnText, and w5 in context
+ *                             accepts embedFn, lastTurnText, w5, and recentText in context
  * classifyTurn              - heuristic turn-type classifier (dialogue/action/transition/intimate)
  * adaptiveBudgets           - adjusts injection budgets per tier based on turn type
  *
@@ -111,7 +114,7 @@ function normalizeExpiration(value, fallback = 'session') {
   return fallback;
 }
 
-function keywordSet(text) {
+export function keywordSet(text) {
   return new Set(
     String(text || '')
       .toLowerCase()
@@ -138,6 +141,62 @@ function keywordFrequencyScore(mem, freq) {
     score += freq.get(w) ?? 0;
   }
   return score;
+}
+
+/**
+ * Extracts keyword trigger candidates from a memory content string.
+ *
+ * Returns the set of lowercase word tokens (4+ chars, non-stopword) from the
+ * content, minus any token that exactly matches a name in excludeNames. Names
+ * are excluded unconditionally because they appear in almost every memory and
+ * would become useless high-frequency triggers that match everything.
+ *
+ * @param {string} content - Memory content string.
+ * @param {string[]} [excludeNames=[]] - Character/group-member names to exclude.
+ * @returns {string[]} Deduplicated array of candidate trigger tokens.
+ */
+export function deriveTriggers(content, excludeNames = []) {
+  const excluded = new Set(excludeNames.map((n) => n.toLowerCase().trim()));
+  return [
+    ...new Set(
+      String(content || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter((w) => w.length >= 4 && !STOPWORDS.has(w) && !excluded.has(w)),
+    ),
+  ];
+}
+
+/**
+ * Filters a set of trigger candidates by corpus frequency.
+ *
+ * Triggers that appear (as a substring) in more than `threshold` fraction of
+ * all supplied memories are dropped - these are setting-omnipresent terms that
+ * would fire on nearly every turn and add no signal. At threshold=0.35 a term
+ * must be present in fewer than 35% of memories to be kept.
+ *
+ * @param {string[]} triggers - Candidate trigger tokens from deriveTriggers.
+ * @param {Object[]} allMemories - Full active memory array to compute frequency against.
+ * @param {number} [threshold=0.35] - Maximum fraction of memories a term may appear in.
+ * @returns {string[]} Filtered trigger array.
+ */
+export function filterTriggersByFrequency(triggers, allMemories, threshold = 0.35) {
+  if (!triggers || triggers.length === 0 || allMemories.length === 0) return triggers ?? [];
+  const maxCount = Math.ceil(allMemories.length * threshold);
+  return triggers.filter((t) => {
+    let count = 0;
+    for (const m of allMemories) {
+      if (
+        String(m.content || '')
+          .toLowerCase()
+          .includes(t)
+      ) {
+        if (++count > maxCount) return false;
+      }
+    }
+    return true;
+  });
 }
 
 /**
@@ -363,10 +422,19 @@ export async function reconcileTypeEntries(
         (reconciled[idx].entities ?? []).length > 0
           ? reconciled[idx].entities
           : (mem.entities ?? []);
+      // Carry triggers forward from the base entry. Consolidation re-parses memory
+      // content from LLM output which produces trigger-less objects; without this
+      // any triggers from the pre-consolidation version of the memory are silently
+      // dropped and cannot be regenerated (the trigger loop skips existing memories).
+      const inheritedTriggers =
+        (reconciled[idx].triggers ?? []).length > 0
+          ? reconciled[idx].triggers
+          : (mem.triggers ?? undefined);
       reconciled[idx] = {
         ...mem,
         ts: Number.isFinite(existingTs) ? existingTs : inferredTs,
         entities: inheritedEntities,
+        ...(inheritedTriggers !== undefined ? { triggers: inheritedTriggers } : {}),
       };
     } else {
       reconciled.push({ ...mem, ts: inferredTs });
@@ -495,8 +563,11 @@ const EXPIRATION_PROXIMITY = { scene: 2, session: 1, permanent: 0 };
  *   arcSimilarities?: Map<string, number>,
  *   turnSimilarities?: Map<string, number>,
  *   w5?: number,
+ *   recentText?: string,
  * }} [context={}] - Optional per-turn signals. arcSimilarities and turnSimilarities map
  *   memory id to pre-computed cosine scores - provided by hybridPrioritize.
+ *   recentText is the lowercased concatenation of the last few chat messages,
+ *   used to evaluate activation triggers.
  * @returns {number}
  */
 export function hybridScore(mem, context = {}) {
@@ -510,6 +581,7 @@ export function hybridScore(mem, context = {}) {
     arcSimilarities = null,
     turnSimilarities = null,
     w5 = 0,
+    recentText = '',
   } = context;
 
   // w1: existing utility score (0-500+ range, dominates when other signals are absent)
@@ -569,12 +641,48 @@ export function hybridScore(mem, context = {}) {
   const contradictionPenalty =
     Array.isArray(mem.contradicts) && mem.contradicts.length > 0 ? 50 : 0;
 
+  // Contextual relevance bonus: rewards memories whose content overlaps with
+  // the current turn text. For Profile B memories that carry LLM-suggested
+  // triggers (synonyms and contextual cues not in the content itself), those
+  // are checked first and score higher per hit. For all memories, content-word
+  // overlap against the recent turn is the baseline signal - this is meaningful
+  // because it surfaces memories about what is actually being discussed right now,
+  // which noun-derived triggers would redundantly replicate from the content anyway.
+  // Capped at 3 hits so a single verbose memory cannot dominate the budget.
+  let triggerBonus = 0;
+  if (recentText) {
+    const recentWords = new Set(recentText.split(/\W+/).filter((w) => w.length >= 4));
+    let hits = 0;
+    // LLM-suggested triggers (Profile B): higher bonus per hit because they add
+    // signal beyond what direct content matching already provides.
+    if (Array.isArray(mem.triggers) && mem.triggers.length > 0) {
+      for (const t of mem.triggers) {
+        if (recentWords.has(t)) {
+          triggerBonus += 80;
+          if (++hits >= 3) break;
+        }
+      }
+    }
+    // Content-word overlap (all profiles): bonus for significant words from the
+    // memory content that appear in the recent turn. Uses keywordSet (3+ chars,
+    // non-stopword) so common words do not inflate the score.
+    if (hits < 3) {
+      for (const w of keywordSet(mem.content)) {
+        if (recentWords.has(w)) {
+          triggerBonus += 40;
+          if (++hits >= 3) break;
+        }
+      }
+    }
+  }
+
   return (
     utility +
     entityOverlap * 100 +
     arcRelevance * 60 +
     temporalProximity * 30 +
-    turnSim * w5 * 100 -
+    turnSim * w5 * 100 +
+    triggerBonus -
     contradictionPenalty
   );
 }
@@ -595,8 +703,10 @@ export function hybridScore(mem, context = {}) {
  *   entityRegistry?: Array,
  *   arcs?: Array,
  *   embedFn?: function(string[]): Promise<Map<string, number[]>>,
+ *   recentText?: string,
  * }} [context={}] - embedFn defaults to a no-op so tests do not need the ST runtime.
  *   Production callers should pass getEmbeddingBatch from embeddings.js.
+ *   recentText is the lowercased concatenation of recent messages for trigger matching.
  * @returns {Promise<Array>}
  */
 /**
@@ -641,6 +751,7 @@ export async function hybridPrioritize(memories, context = {}) {
     lastTurnText = '',
     w5 = 0,
   } = context;
+  // recentText (for trigger matching) passes through via the ...context spread below.
   const keywordFreq = buildKeywordFrequency(memories);
 
   // Pre-compute arc and turn similarities via a single embedding batch.

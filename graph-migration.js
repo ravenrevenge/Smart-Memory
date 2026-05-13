@@ -38,6 +38,8 @@
  * Internal helpers (not exported):
  * assertNonDestructive         - throws if a migration step deleted or overwrote a pre-existing field
  * applyMigrations              - drives the step loop and calls assertNonDestructive after each step
+ * migrateCharacter_v8          - adds epistemic_knowledge array and backfills witnessed_by on memories
+ * migrateChat_v9               - adds state_ledger map for structured entity state cards
  */
 
 import { saveSettingsDebounced } from '../../../../script.js';
@@ -70,6 +72,7 @@ export function applyGraphDefaults(mem) {
     ...mem,
     id: mem.id ?? generateMemoryId(),
     source_messages: mem.source_messages ?? [],
+    source_chat_id: mem.source_chat_id ?? null,
     entities: mem.entities ?? [],
     time_scope: mem.time_scope ?? 'global',
     valid_from: mem.valid_from ?? null,
@@ -816,6 +819,61 @@ function migrateChat_v5(chatMeta) {
   return updated;
 }
 
+/**
+ * CHARACTER migration: version 5 -> 6
+ *
+ * Adds a `triggers` array to every long-term memory. Triggers are short
+ * keyword strings derived from the memory content at extraction time. When
+ * any trigger appears in the current chat turn, the memory gets a score
+ * bonus in hybridScore and is also injected into the secondary
+ * PROMPT_KEY_TRIGGERED slot closer to the prompt.
+ *
+ * Existing memories receive an empty array here; triggers are derived from
+ * content on the next extraction pass via deriveTriggers in memory-utils.js.
+ *
+ * @param {Object} charData - Character data object.
+ * @returns {Object} Updated character data with schema_version NOT yet set.
+ */
+function migrateCharacter_v6(charData) {
+  const memories = (charData.memories ?? []).map((m) =>
+    Object.prototype.hasOwnProperty.call(m, 'triggers') ? m : { ...m, triggers: [] },
+  );
+  return { ...charData, memories };
+}
+
+function migrateCharacter_v7(charData) {
+  // Add relationship_history map if absent. Keys are "subject→target" strings.
+  // Old-format entries (descriptors: string[]) are normalized at read time by
+  // loadRelationshipHistory, so no data conversion is needed here.
+  if (Object.prototype.hasOwnProperty.call(charData, 'relationship_history')) return charData;
+  return { ...charData, relationship_history: {} };
+}
+
+/**
+ * CHARACTER migration: version 7 -> 8
+ *
+ * Adds the epistemic_knowledge array for the Perspectives & Secrets subsystem.
+ * Also backfills witnessed_by: [] onto every existing long-term memory that
+ * lacks the field. An empty array means "unknown witnesses" - the injection
+ * filter treats these as unfiltered (inject as normal) so old memories are
+ * unaffected until the next extraction pass tags them properly.
+ *
+ * @param {Object} charData - Character data object.
+ * @returns {Object} Updated character data with schema_version NOT yet set.
+ */
+function migrateCharacter_v8(charData) {
+  if (Object.prototype.hasOwnProperty.call(charData, 'epistemic_knowledge')) return charData;
+  const memories = (charData.memories ?? []).map((m) =>
+    Object.prototype.hasOwnProperty.call(m, 'witnessed_by') ? m : { ...m, witnessed_by: [] },
+  );
+  return { ...charData, epistemic_knowledge: [], memories };
+}
+
+function migrateChat_v9(chatMeta) {
+  if (Object.prototype.hasOwnProperty.call(chatMeta, 'state_ledger')) return chatMeta;
+  return { ...chatMeta, state_ledger: {} };
+}
+
 // ---- Step registries --------------------------------------------------------
 // Map<version, stepFn | { fn, deletePaths }> - add new entries here when
 // SCHEMA_VERSION is bumped. Use { fn, deletePaths } only when a step
@@ -825,6 +883,9 @@ const CHARACTER_MIGRATIONS = new Map([
   [1, migrateCharacter_v1],
   [2, migrateCharacter_v2],
   [4, migrateCharacter_v4],
+  [6, migrateCharacter_v6],
+  [7, migrateCharacter_v7],
+  [8, migrateCharacter_v8],
 ]);
 
 const CHAT_MIGRATIONS = new Map([
@@ -834,6 +895,7 @@ const CHAT_MIGRATIONS = new Map([
   [3, { fn: migrateChat_v3, deletePaths: ['profiles'] }],
   // v5 renames entities -> sessionEntities.
   [5, { fn: migrateChat_v5, deletePaths: ['entities'] }],
+  [9, migrateChat_v9],
 ]);
 
 // ---- Migration runner -------------------------------------------------------

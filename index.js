@@ -49,6 +49,7 @@ import {
 } from '../../../extensions.js';
 import {
   MODULE_NAME,
+  META_KEY,
   PROMPT_KEY_SHORT,
   PROMPT_KEY_LONG,
   PROMPT_KEY_SESSION,
@@ -57,6 +58,10 @@ import {
   PROMPT_KEY_REPAIR,
   PROMPT_KEY_PROFILES,
   PROMPT_KEY_CANON,
+  PROMPT_KEY_TRIGGERED,
+  PROMPT_KEY_RELATIONSHIPS,
+  PROMPT_KEY_EPISTEMIC,
+  PROMPT_KEY_STATE_LEDGER,
 } from './constants.js';
 import { memory_sources, abortCurrentMemoryGeneration } from './generate.js';
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
@@ -74,6 +79,7 @@ import {
   injectMemories,
   loadCharacterMemories,
   isFreshStart,
+  injectRelationshipHistory,
 } from './longterm.js';
 import { updateLastActive, getAwayHours, generateRecap, displayRecap } from './recap.js';
 import {
@@ -89,8 +95,10 @@ import {
   loadArcs,
   loadArcSummaries,
   mergePersistentArcs,
-  loadPersistentArcs,
-  savePersistentArcs,
+  mergeGroupPersistentArcs,
+  loadGroupPersistentArcs,
+  saveGroupPersistentArcs,
+  pruneOrphanedGroupArcs,
 } from './arcs.js';
 import {
   checkContinuity,
@@ -117,7 +125,20 @@ import {
 import { generateProfiles, injectProfiles, loadProfiles } from './profiles.js';
 import { classifyTurn, adaptiveBudgets } from './memory-utils.js';
 import { clearUnifiedSlot, maybeInjectUnified } from './unified-inject.js';
+import { registerSmartMemoryMacros } from './macros.js';
 import { smLog } from './logging.js';
+import {
+  isEpistemicEnabled,
+  extractEpistemicKnowledge,
+  injectEpistemicKnowledge,
+  loadAndInjectEpistemicKnowledge,
+  resetEpistemicWarnFlag,
+} from './epistemic.js';
+import {
+  runStateCardExtraction,
+  injectStateLedger,
+  loadAndInjectStateLedger,
+} from './state-ledger.js';
 import {
   setStatusMessage,
   updateShortTermUI,
@@ -129,6 +150,8 @@ import {
   updateFreshStartUI,
   updateCanonUI,
   updateProfilesUI,
+  updateRelationshipHistoryUI,
+  updateEpistemicUI,
   updateEntityPanel,
   updateEmbeddingNotice,
   setContinuityBadge,
@@ -136,7 +159,8 @@ import {
   initTooltips,
   initTypePickers,
 } from './ui.js';
-import { defaultSettings, loadSettings, bindSettingsUI } from './settings.js';
+import { defaultSettings, loadSettings, bindSettingsUI, autoTuneBudgets } from './settings.js';
+import { clearTierTrimStats, resetTrimToastFlag, markChatLoadComplete } from './trim-stats.js';
 
 // ---- Module-level state -------------------------------------------------
 
@@ -243,6 +267,42 @@ function getStableExtractionWindow(chat, windowSize) {
 }
 
 /**
+ * Smart extraction window for memory tiers.
+ *
+ * On first extraction (lastCutoff null) falls back to maxWindow. On subsequent
+ * passes, starts from just after the last processed message but always includes
+ * at least extractEvery * 2 messages so the model has enough context to make
+ * meaningful distinctions. Capped at maxWindow to avoid unbounded growth when
+ * the chat has advanced a long way since the last pass.
+ *
+ * @param {Array} chat - Full chat array from SillyTavern context.
+ * @param {number|null} lastCutoff - Exclusive end index used in the previous pass, or null.
+ * @param {number} extractEvery - Current extraction interval setting.
+ * @param {number} maxWindow - Hard cap on window size.
+ * @returns {Array} Stable message slice.
+ */
+function getSmartExtractionWindow(chat, lastCutoff, extractEvery, maxWindow) {
+  if (!Array.isArray(chat) || chat.length === 0) return [];
+
+  const last = chat[chat.length - 1];
+  const cutoff = last && !last.is_user && !last.is_system ? chat.length - 1 : chat.length;
+  if (cutoff <= 0) return [];
+
+  let start;
+  if (lastCutoff === null || lastCutoff === undefined) {
+    start = Math.max(0, cutoff - maxWindow);
+  } else {
+    // Start from just after the last processed message, but ensure at least
+    // extractEvery * 2 messages of context. Cap at maxWindow so a very old
+    // lastCutoff does not produce a huge window.
+    const newStart = lastCutoff;
+    const minContextStart = cutoff - extractEvery * 2;
+    start = Math.max(Math.min(newStart, minContextStart), cutoff - maxWindow, 0);
+  }
+  return chat.slice(start, cutoff);
+}
+
+/**
  * Stable extraction window with fallback for small/new chats.
  *
  * @param {Array} chat - Full chat array from SillyTavern context.
@@ -317,6 +377,10 @@ function clearAllInjections() {
   setExtensionPrompt(PROMPT_KEY_REPAIR, '', none, 0);
   setExtensionPrompt(PROMPT_KEY_PROFILES, '', none, 0);
   setExtensionPrompt(PROMPT_KEY_CANON, '', none, 0);
+  setExtensionPrompt(PROMPT_KEY_TRIGGERED, '', none, 0);
+  setExtensionPrompt(PROMPT_KEY_RELATIONSHIPS, '', none, 0);
+  setExtensionPrompt(PROMPT_KEY_EPISTEMIC, '', none, 0);
+  setExtensionPrompt(PROMPT_KEY_STATE_LEDGER, '', none, 0);
   clearUnifiedSlot();
   updateTokenDisplay();
 }
@@ -482,6 +546,10 @@ async function onCharacterMessageRendered() {
         injectSceneHistory();
         updateScenesUI();
         updateTokenDisplay();
+        if (isEpistemicEnabled()) {
+          await extractEpistemicKnowledge(sceneMessageBuffer, characterName);
+          injectEpistemicKnowledge(characterName, characterName, true, true);
+        }
         sceneMessageBuffer = [];
         sceneBufferLastIndex = -1;
         setStatusMessage('Scene break detected.');
@@ -515,13 +583,25 @@ async function onCharacterMessageRendered() {
       const capturedGen = chatLoadId;
       const chatChanged = () => chatLoadId !== capturedGen;
 
-      // Use separate windows per tier. Session benefits from more context than
-      // long-term (scene/detail extraction needs the surrounding messages);
-      // long-term extraction targets distilled facts that are visible in a
-      // narrower window. Arc extraction uses a wide window to catch threads
-      // that were introduced earlier in the session.
-      const sessionWindow = getStableExtractionWindow(context.chat, 40);
-      const longtermWindow = getStableExtractionWindow(context.chat, 20);
+      // Use separate windows per tier. Both memory tiers use a smart window
+      // that starts from just after the last processed message so already-seen
+      // messages are not re-fed on every pass. A minimum of extractEvery * 2
+      // messages is always included so the model has enough context to make
+      // meaningful distinctions. Arc extraction uses a fixed wide window to
+      // catch threads that were introduced earlier in the session.
+      const lastExtractCutoff = context.chatMetadata?.[META_KEY]?.lastExtractCutoff ?? null;
+      const sessionWindow = getSmartExtractionWindow(
+        context.chat,
+        lastExtractCutoff,
+        extractEvery,
+        40,
+      );
+      const longtermWindow = getSmartExtractionWindow(
+        context.chat,
+        lastExtractCutoff,
+        extractEvery,
+        20,
+      );
 
       // If only a fresh assistant reply exists beyond the stable boundary,
       // postpone extraction until the next turn so swipes settle first.
@@ -536,7 +616,7 @@ async function onCharacterMessageRendered() {
       // Only reset the counter once we know extraction will actually proceed.
       messagesSinceLastExtraction = 0;
 
-      setStatusMessage('Extracting memories...');
+      setStatusMessage(`Extracting memories for ${characterName}...`);
 
       // Run extraction tiers sequentially rather than in parallel.
       // Parallel model calls overwhelm local hardware (RTX 2080 / 8GB VRAM)
@@ -616,12 +696,14 @@ async function onCharacterMessageRendered() {
           longtermWindow.length > 0 &&
           !isFreshStart()
         ) {
-          const count = await extractAndStoreMemories(characterName, longtermWindow).catch(
-            (err) => {
-              console.error('[SmartMemory] Long-term extraction error:', err);
-              return 0;
-            },
-          );
+          const count = await extractAndStoreMemories(
+            characterName,
+            longtermWindow,
+            setStatusMessage,
+          ).catch((err) => {
+            console.error('[SmartMemory] Long-term extraction error:', err);
+            return 0;
+          });
           // Run consolidation after extraction if new memories were added.
           if (count > 0 && settings.consolidation_enabled && !consolidationRunning) {
             consolidationRunning = true;
@@ -631,7 +713,7 @@ async function onCharacterMessageRendered() {
             });
             consolidationRunning = false;
             if (removed > 0) {
-              setStatusMessage(`Consolidated ${removed} redundant memories.`);
+              setStatusMessage(`Consolidated ${removed} redundant memories for ${characterName}.`);
               toastr.info(
                 `Merged ${removed} redundant ${removed === 1 ? 'memory' : 'memories'}.`,
                 'Smart Memory',
@@ -642,7 +724,10 @@ async function onCharacterMessageRendered() {
           // Inject once after extraction (and any consolidation) - this is the
           // one call per AI response turn where telemetry should be updated.
           await injectMemories(characterName, true);
+          injectRelationshipHistory(characterName);
           updateLongTermUI(characterName);
+          updateRelationshipHistoryUI(characterName);
+          updateEpistemicUI(characterName);
           total += count;
         }
 
@@ -664,6 +749,14 @@ async function onCharacterMessageRendered() {
           injectArcs();
           updateArcsUI();
           total += count;
+        }
+
+        if (chatChanged()) throw CHAT_SWITCHED;
+        if (!isFreshStart()) {
+          await runStateCardExtraction(characterName, longtermWindow).catch((err) => {
+            console.error('[SmartMemory] State ledger extraction error:', err);
+          });
+          injectStateLedger(true);
         }
 
         // Regenerate profiles after each extraction pass so they reflect the
@@ -705,7 +798,22 @@ async function onCharacterMessageRendered() {
         updateEntityPanel(characterName);
         maybeInjectUnified();
         updateTokenDisplay();
-        setStatusMessage(total > 0 ? `${total} item${total === 1 ? '' : 's'} stored.` : '');
+        autoTuneBudgets(characterName);
+        setStatusMessage(
+          total > 0 ? `${total} item${total === 1 ? '' : 's'} stored for ${characterName}.` : '',
+        );
+
+        // Persist the cutoff so the next extraction pass knows where this one ended.
+        const lastMsg = context.chat[context.chat.length - 1];
+        const newCutoff =
+          context.chat.length > 0 && lastMsg && !lastMsg.is_user && !lastMsg.is_system
+            ? context.chat.length - 1
+            : context.chat.length;
+        const metaAfter = context.chatMetadata?.[META_KEY];
+        if (metaAfter) {
+          metaAfter.lastExtractCutoff = newCutoff;
+          context.saveMetadata();
+        }
       } catch (err) {
         if (err === CHAT_SWITCHED) {
           smLog('[SmartMemory] Extraction aborted: chat switched mid-extraction.');
@@ -818,6 +926,11 @@ function onChatChanged() {
 async function onChatChangedImpl() {
   ++chatLoadId;
 
+  // Reset per-load flags so warnings and trim indicators start fresh for the new chat.
+  resetEpistemicWarnFlag();
+  clearTierTrimStats();
+  resetTrimToastFlag();
+
   // Dismiss any recap overlay from the previous chat immediately - it is modal
   // and blocks input, so leaving it up over the new chat is confusing.
   $('#sm_recap_overlay').remove();
@@ -843,6 +956,10 @@ async function onChatChangedImpl() {
   // Fast no-op when the container is already at the current schema version.
   await ensureChatMigrated();
 
+  // Remove group arc stores for groups that no longer exist. Runs once per
+  // chat load; cheap enough that it does not need further throttling.
+  pruneOrphanedGroupArcs();
+
   const settings = getSettings();
   if (!settings.enabled) return;
 
@@ -854,6 +971,8 @@ async function onChatChangedImpl() {
     const summary = loadAndInjectSummary();
     updateShortTermUI(summary);
     injectSceneHistory();
+    // Merge group-level persistent arcs into this chat before injecting.
+    await mergeGroupPersistentArcs(getContext().groupId);
     injectArcs();
     updateScenesUI();
     updateArcsUI();
@@ -866,11 +985,16 @@ async function onChatChangedImpl() {
     // are migrated lazily on their first onGroupMemberDrafted.
     if (selectedGroupCharacter) ensureCharacterMigrated(selectedGroupCharacter);
     await injectMemories(selectedGroupCharacter);
+    injectRelationshipHistory(selectedGroupCharacter);
+    loadAndInjectEpistemicKnowledge(selectedGroupCharacter, selectedGroupCharacter);
+    loadAndInjectStateLedger();
     await injectSessionMemories();
     injectCanon(selectedGroupCharacter);
     injectProfiles(selectedGroupCharacter);
     loadAndInjectRepair();
     updateLongTermUI(selectedGroupCharacter);
+    updateRelationshipHistoryUI(selectedGroupCharacter);
+    updateEpistemicUI(selectedGroupCharacter);
     updateSessionUI();
     updateFreshStartUI(isFreshStart());
     updateCanonUI(selectedGroupCharacter);
@@ -879,6 +1003,10 @@ async function onChatChangedImpl() {
 
     maybeInjectUnified();
     updateTokenDisplay();
+    autoTuneBudgets(selectedGroupCharacter);
+    // Mark load complete so the trim toast can fire on the next injection cycle,
+    // not immediately on load before the user has done anything.
+    markChatLoadComplete();
 
     const groupChatMeta = getContext().chatMetadata;
     if (settings.recap_enabled) {
@@ -949,6 +1077,9 @@ async function onChatChangedImpl() {
   updateShortTermUI(summary);
 
   await injectMemories(characterName);
+  injectRelationshipHistory(characterName);
+  loadAndInjectEpistemicKnowledge(characterName, characterName);
+  loadAndInjectStateLedger();
 
   await injectSessionMemories();
   injectSceneHistory();
@@ -959,6 +1090,8 @@ async function onChatChangedImpl() {
   loadAndInjectRepair();
 
   updateLongTermUI(characterName);
+  updateRelationshipHistoryUI(characterName);
+  updateEpistemicUI(characterName);
   updateFreshStartUI(freshStart);
   updateSessionUI();
   updateScenesUI();
@@ -967,6 +1100,7 @@ async function onChatChangedImpl() {
   updateProfilesUI(loadProfiles(characterName));
   maybeInjectUnified();
   updateTokenDisplay();
+  autoTuneBudgets(characterName);
   updateEmbeddingNotice();
 
   // Show a recap popup if the user has been away long enough.
@@ -1110,6 +1244,8 @@ async function onGroupMemberDrafted(chId) {
   updateShortTermUI(summary);
 
   await injectMemories(characterName);
+  injectRelationshipHistory(characterName);
+  injectEpistemicKnowledge(characterName, characterName);
   await injectSessionMemories();
   injectSceneHistory();
   injectArcs();
@@ -1211,6 +1347,14 @@ async function onGroupWrapperFinished({ type } = {}) {
         updateScenesUI();
         maybeInjectUnified();
         updateTokenDisplay();
+        if (isEpistemicEnabled()) {
+          // Store under the selected character; fall back to first responder this round.
+          const epistemicChar = selectedGroupCharacter || [...roundResponders][0] || null;
+          if (epistemicChar) {
+            await extractEpistemicKnowledge(sceneMessageBuffer, epistemicChar);
+            injectEpistemicKnowledge(epistemicChar, epistemicChar, true, true);
+          }
+        }
         sceneMessageBuffer = [];
         sceneBufferLastIndex = -1;
         setStatusMessage('Scene break detected.');
@@ -1239,11 +1383,22 @@ async function onGroupWrapperFinished({ type } = {}) {
       extractionRunning = true;
       smLog(`[SmartMemory] Group extraction starting at ${new Date().toISOString()}`);
 
-      const sessionWindow = getStableExtractionWindow(context.chat, 40);
+      const lastExtractCutoff = context.chatMetadata?.[META_KEY]?.lastExtractCutoff ?? null;
+      const sessionWindow = getSmartExtractionWindow(
+        context.chat,
+        lastExtractCutoff,
+        extractEvery,
+        40,
+      );
       // Scale the raw window by character count so that after per-character
       // filtering each character still gets roughly 20 messages of context.
       const longtermRawSize = 20 * Math.max(1, roundResponders.size);
-      const longtermWindow = getStableExtractionWindow(context.chat, longtermRawSize);
+      const longtermWindow = getSmartExtractionWindow(
+        context.chat,
+        lastExtractCutoff,
+        extractEvery,
+        longtermRawSize,
+      );
 
       if (longtermWindow.length === 0 && sessionWindow.length === 0) {
         extractionRunning = false;
@@ -1331,6 +1486,7 @@ async function onGroupWrapperFinished({ type } = {}) {
               const count = await extractAndStoreMemories(
                 characterName,
                 characterLongtermWindow,
+                setStatusMessage,
               ).catch((err) => {
                 console.error('[SmartMemory] Long-term extraction error:', err);
                 return 0;
@@ -1343,7 +1499,9 @@ async function onGroupWrapperFinished({ type } = {}) {
                 });
                 consolidationRunning = false;
                 if (removed > 0) {
-                  setStatusMessage(`Consolidated ${removed} redundant memories.`);
+                  setStatusMessage(
+                    `Consolidated ${removed} redundant memories for ${characterName}.`,
+                  );
                   toastr.info(
                     `Merged ${removed} redundant ${removed === 1 ? 'memory' : 'memories'}.`,
                     'Smart Memory',
@@ -1385,17 +1543,37 @@ async function onGroupWrapperFinished({ type } = {}) {
             updateArcsUI();
             total += count;
 
-            // Clean persistent arcs for all responding characters. The solo path
-            // does this inside extractArcs via characterName, but group arc
-            // extraction is chat-wide with no single characterName. Any persistent
-            // arc whose content is no longer in the current arc list was resolved.
-            const currentArcContents = new Set(loadArcs().map((a) => a.content));
-            for (const charName of roundResponders) {
-              const persistent = loadPersistentArcs(charName);
-              if (persistent.length === 0) continue;
-              const cleaned = persistent.filter((a) => currentArcContents.has(a.content));
-              if (cleaned.length < persistent.length) savePersistentArcs(charName, cleaned);
+            // Sync resolved flags into the group persistent store. The solo path
+            // handles this inside extractArcs via characterName, but group arc
+            // extraction is chat-wide with no single characterName. Any arc now
+            // marked resolved in chatMetadata should also be marked resolved in
+            // the group store so the state carries into future chats.
+            const groupId = context.groupId;
+            if (groupId) {
+              const currentArcs = loadArcs();
+              const resolvedContents = new Set(
+                currentArcs.filter((a) => a.resolved).map((a) => a.content),
+              );
+              if (resolvedContents.size > 0) {
+                const groupPersistent = loadGroupPersistentArcs(groupId);
+                let changed = false;
+                for (const p of groupPersistent) {
+                  if (resolvedContents.has(p.content) && !p.resolved) {
+                    p.resolved = true;
+                    changed = true;
+                  }
+                }
+                if (changed) saveGroupPersistentArcs(groupId, groupPersistent);
+              }
             }
+          }
+
+          if (chatChanged()) throw CHAT_SWITCHED;
+          if (!isFreshStart()) {
+            await runStateCardExtraction(null, longtermWindow).catch((err) => {
+              console.error('[SmartMemory] State ledger extraction error:', err);
+            });
+            injectStateLedger(true);
           }
 
           // Profile B only: auto-regenerate canon per responding character when
@@ -1423,9 +1601,25 @@ async function onGroupWrapperFinished({ type } = {}) {
           // is showing so new memories appear without the user having to
           // manually switch selection.
           updateLongTermUI(selectedGroupCharacter);
+          updateRelationshipHistoryUI(selectedGroupCharacter);
           updateSessionUI();
 
           setStatusMessage(total > 0 ? `${total} item${total === 1 ? '' : 's'} stored.` : '');
+          autoTuneBudgets(selectedGroupCharacter);
+
+          const lastMsgGroup = context.chat[context.chat.length - 1];
+          const newCutoffGroup =
+            context.chat.length > 0 &&
+            lastMsgGroup &&
+            !lastMsgGroup.is_user &&
+            !lastMsgGroup.is_system
+              ? context.chat.length - 1
+              : context.chat.length;
+          const metaAfterGroup = context.chatMetadata?.[META_KEY];
+          if (metaAfterGroup) {
+            metaAfterGroup.lastExtractCutoff = newCutoffGroup;
+            context.saveMetadata();
+          }
         } catch (err) {
           if (err === CHAT_SWITCHED) {
             smLog('[SmartMemory] Group extraction aborted: chat switched mid-extraction.');
@@ -1512,6 +1706,8 @@ async function onGroupWrapperFinished({ type } = {}) {
   // so the token display reflects what the panel is showing, not who generated last.
   if (selectedGroupCharacter) {
     await injectMemories(selectedGroupCharacter);
+    injectRelationshipHistory(selectedGroupCharacter);
+    injectEpistemicKnowledge(selectedGroupCharacter, selectedGroupCharacter);
     injectCanon(selectedGroupCharacter);
     injectProfiles(selectedGroupCharacter);
     maybeInjectUnified();
@@ -1545,6 +1741,7 @@ function onGroupUpdated() {
 
 jQuery(async function () {
   loadSettings();
+  registerSmartMemoryMacros();
 
   const html = await renderExtensionTemplateAsync('third-party/Smart-Memory', 'settings', {
     defaultSettings,
@@ -1701,7 +1898,7 @@ jQuery(async function () {
       callback: async () => {
         if (compactionRunning) return 'Compaction already running.';
         compactionRunning = true;
-        setStatusMessage('Generating summary...');
+        setStatusMessage('Extracting short-term memories...');
         try {
           const summary = await runCompaction();
           if (summary) {
@@ -1736,21 +1933,23 @@ jQuery(async function () {
         const characterName = getCurrentCharacterName();
         if (!characterName) return 'No character active.';
         extractionRunning = true;
-        setStatusMessage('Extracting memories...');
+        setStatusMessage(`Extracting memories for ${characterName}...`);
         try {
           const context = getContext();
           const recentLongTerm = getStableExtractionWindowWithFallback(context.chat, 20);
           const recentSession = getStableExtractionWindowWithFallback(context.chat, 40);
           const recentArcs = getStableExtractionWindowWithFallback(context.chat, 100);
           if (!isFreshStart()) {
-            await extractAndStoreMemories(characterName, recentLongTerm);
+            await extractAndStoreMemories(characterName, recentLongTerm, setStatusMessage);
             await extractArcs(recentArcs, characterName);
             await extractSessionMemories(recentSession);
           }
           await injectMemories(characterName);
+          injectRelationshipHistory(characterName);
           await injectSessionMemories();
           injectArcs();
           updateLongTermUI(characterName);
+          updateRelationshipHistoryUI(characterName);
           updateSessionUI();
           updateArcsUI();
           saveSettingsDebounced();

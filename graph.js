@@ -47,14 +47,14 @@ const ENTITY_COLORS = {
 
 // Memory type colors (kept in sync with CSS badge definitions in style.css).
 const MEMORY_COLORS = {
-  fact: '#4a6fa5',
-  relationship: '#8e5a8e',
-  preference: '#5a8e5a',
-  event: '#8e6e3a',
-  scene: '#5a8e7a',
-  revelation: '#8e5a5a',
-  development: '#7a7a3a',
-  detail: '#3a7a8e',
+  fact: 'oklch(57% 0.10 252)',
+  relationship: 'oklch(57% 0.10 0)',
+  preference: 'oklch(57% 0.10 144)',
+  event: 'oklch(57% 0.10 36)',
+  scene: 'oklch(57% 0.10 180)',
+  revelation: 'oklch(57% 0.10 324)',
+  development: 'oklch(57% 0.10 108)',
+  detail: 'oklch(57% 0.10 216)',
 };
 
 const ENTITY_RADIUS = 32;
@@ -281,6 +281,7 @@ function buildGraph(characterName, opts) {
       color: MEMORY_COLORS[mem.type] ?? '#666',
       radius: r,
       retired: Boolean(mem.superseded_by),
+      triggers: Array.isArray(mem.triggers) && mem.triggers.length > 0 ? mem.triggers : null,
       x: 0,
       y: 0,
       vx: 0,
@@ -644,9 +645,12 @@ function renderTooltip() {
 
   const esc = (s) => $('<div>').text(s).html();
   const typeLabel = node.nodeType === 'entity' ? `Entity - ${node.subtype}` : node.subtype;
+  const triggersLine = node.triggers
+    ? `<span class="sm_graph_tip_triggers">Triggers: ${esc(node.triggers.join(', '))}</span>`
+    : '';
   const content = `<strong>${esc(node.nodeType === 'entity' ? node.label : node.subtype)}</strong>
     <span class="sm_graph_tip_type">${esc(typeLabel)}</span>
-    <span class="sm_graph_tip_detail">${esc(node.detail)}</span>`;
+    <span class="sm_graph_tip_detail">${esc(node.detail)}</span>${triggersLine}`;
 
   $tip.html(content);
 

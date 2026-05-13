@@ -27,7 +27,9 @@
  * chat uses a larger roleplay-tuned model.
  *
  * memory_sources                - enum of supported sources: 'main' | 'webllm' | 'ollama' | 'openai_compatible'
- * generateMemoryExtract         - for extraction tasks (self-contained prompt, no chat context needed)
+ * generateMemoryExtract         - for extraction tasks (self-contained prompt, no chat context needed);
+ *                                 automatically strips reasoning blocks on Ollama/OpenAI-compat paths
+ *                                 using ST's reasoning template list (main API path handled by ST itself)
  * generateMemorySummarize       - for summarization tasks (needs the full chat context)
  * fetchOllamaModels             - returns the list of models installed in a local Ollama instance
  * abortCurrentMemoryGeneration  - cancels any in-flight Ollama or OpenAI-compat fetch immediately
@@ -35,9 +37,9 @@
 
 import { generateRaw, generateQuietPrompt, getMaxContextSize } from '../../../../script.js';
 import { getContext, extension_settings } from '../../../extensions.js';
-import { estimateTokens } from './constants.js';
+import { reasoning_templates, parseReasoningFromString } from '../../../../scripts/reasoning.js';
+import { estimateTokens, MEMORY_GENERATION_BUDGET, MODULE_NAME } from './constants.js';
 import { isWebLlmSupported, generateWebLlmChatPrompt } from '../../shared.js';
-import { MODULE_NAME } from './constants.js';
 
 /**
  * Holds the AbortController for the currently running Ollama or OpenAI-compat
@@ -46,6 +48,34 @@ import { MODULE_NAME } from './constants.js';
  * abortCurrentMemoryGeneration() when a swipe is requested.
  */
 let memoryAbortController = null;
+
+/**
+ * Strips reasoning blocks from a raw model response using SillyTavern's
+ * reasoning template list. Tries every loaded template (non-strict mode so
+ * the block does not have to be at the very start of the string) and returns
+ * the content with all matched blocks removed.
+ *
+ * This piggybacks on ST's template knowledge so new model families are
+ * supported automatically when ST adds templates for them, without any
+ * changes needed here.
+ *
+ * Only applied on Ollama and OpenAI-compatible paths - the main API path
+ * goes through ST's own pipeline which already strips reasoning blocks.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function stripThinkingBlocks(text) {
+  if (!text) return text;
+  let result = text;
+  for (const template of reasoning_templates) {
+    const parsed = parseReasoningFromString(result, { strict: false }, template);
+    if (parsed?.content !== undefined && parsed.content !== result) {
+      result = parsed.content;
+    }
+  }
+  return result.trim();
+}
 
 /**
  * Cancels any in-flight Ollama or OpenAI-compat memory generation immediately.
@@ -113,7 +143,7 @@ export async function fetchOllamaModels(baseUrl) {
  * @param {number} responseLength
  * @returns {Promise<string>}
  */
-async function generateOllama(prompt, priorMessages = [], responseLength = 600) {
+async function generateOllama(prompt, priorMessages = [], numPredict = MEMORY_GENERATION_BUDGET) {
   const settings = extension_settings[MODULE_NAME];
   const url = getOllamaUrl();
   const model = settings?.ollama_model;
@@ -131,10 +161,7 @@ async function generateOllama(prompt, priorMessages = [], responseLength = 600) 
         messages,
         stream: false,
         options: {
-          num_predict: responseLength > 0 ? responseLength : -1,
-          // Cover both Llama-3.1 (<|eot_id|>) and ChatML (<|im_end|>) end-of-turn
-          // tokens explicitly. Listing both is harmless for models that only use one.
-          stop: ['<|eot_id|>', '<|im_end|>'],
+          num_predict: numPredict,
         },
       }),
       signal: memoryAbortController.signal,
@@ -157,7 +184,11 @@ async function generateOllama(prompt, priorMessages = [], responseLength = 600) 
  * @param {number} responseLength
  * @returns {Promise<string>}
  */
-async function generateOpenAICompat(prompt, priorMessages = [], responseLength = 600) {
+async function generateOpenAICompat(
+  prompt,
+  priorMessages = [],
+  responseLength = MEMORY_GENERATION_BUDGET,
+) {
   const settings = extension_settings[MODULE_NAME];
   const baseUrl = (settings?.openai_compat_url || '').replace(/\/$/, '');
   if (!baseUrl) throw new Error('No API URL configured for OpenAI Compatible source.');
@@ -207,34 +238,42 @@ async function generateOpenAICompat(prompt, priorMessages = [], responseLength =
  */
 export async function generateMemoryExtract(prompt, { responseLength = 600 } = {}) {
   const source = getSource();
+  let raw;
 
   if (source === memory_sources.ollama) {
-    return generateOllama(prompt, [], responseLength);
-  }
-
-  if (source === memory_sources.openai_compatible) {
-    return generateOpenAICompat(prompt, [], responseLength);
-  }
-
-  if (source === memory_sources.webllm) {
+    raw = await generateOllama(prompt, []);
+  } else if (source === memory_sources.openai_compatible) {
+    raw = await generateOpenAICompat(prompt, []);
+  } else if (source === memory_sources.webllm) {
     if (!isWebLlmSupported()) {
       console.warn(
         `[${MODULE_NAME}] WebLLM source selected but WebLLM is not available, falling back to main`,
       );
+      raw = await generateRaw({ prompt, instruct: false, quietToLoud: false, responseLength });
     } else {
       const messages = [{ role: 'user', content: prompt }];
       const params = responseLength > 0 ? { max_tokens: responseLength } : {};
-      return await generateWebLlmChatPrompt(messages, params);
+      raw = await generateWebLlmChatPrompt(messages, params);
     }
+  } else {
+    // Default: main API. instruct:false prevents the instruct template from
+    // wrapping the extraction prompt, which is important for our tagged-line
+    // output format ([type:score:expiration] lines). This is a supported
+    // generateRaw parameter in SillyTavern. The parsers are also resilient -
+    // they only match valid tagged lines and ignore everything else - so even
+    // if this were silently ignored the output would still parse correctly.
+    raw = await generateRaw({ prompt, instruct: false, quietToLoud: false, responseLength });
   }
 
-  // Default: main API. instruct:false prevents the instruct template from
-  // wrapping the extraction prompt, which is important for our tagged-line
-  // output format ([type:score:expiration] lines). This is a supported
-  // generateRaw parameter in SillyTavern. The parsers are also resilient -
-  // they only match valid tagged lines and ignore everything else - so even
-  // if this were silently ignored the output would still parse correctly.
-  return await generateRaw({ prompt, instruct: false, quietToLoud: false, responseLength });
+  // Main API path: ST already strips reasoning blocks in its own pipeline.
+  // Ollama and OpenAI-compatible paths bypass ST, so we strip here.
+  const needsStrip = source !== memory_sources.main;
+  const stripped = needsStrip ? stripThinkingBlocks(raw ?? '') : (raw ?? '');
+  // Truncate to responseLength characters as a rough bound - the thinking block
+  // may have inflated the raw output far beyond the intended budget.
+  // 4 chars/token is a conservative estimate; actual token count may be lower.
+  const charLimit = responseLength > 0 ? responseLength * 4 : Infinity;
+  return stripped.length > charLimit ? stripped.slice(0, charLimit) : stripped;
 }
 
 /**
@@ -296,9 +335,15 @@ export async function generateMemorySummarize(
     const priorMessages = trimToBudget(allMessages, getMaxContextSize(responseLength) * 0.6);
 
     if (source === memory_sources.ollama) {
-      return generateOllama(quietPrompt, priorMessages, responseLength);
+      const raw = await generateOllama(quietPrompt, priorMessages);
+      const stripped = stripThinkingBlocks(raw ?? '');
+      const charLimit = responseLength > 0 ? responseLength * 4 : Infinity;
+      return stripped.length > charLimit ? stripped.slice(0, charLimit) : stripped;
     }
-    return generateOpenAICompat(quietPrompt, priorMessages, responseLength);
+    const rawOAI = await generateOpenAICompat(quietPrompt, priorMessages);
+    const strippedOAI = stripThinkingBlocks(rawOAI ?? '');
+    const charLimitOAI = responseLength > 0 ? responseLength * 4 : Infinity;
+    return strippedOAI.length > charLimitOAI ? strippedOAI.slice(0, charLimitOAI) : strippedOAI;
   }
 
   if (source === memory_sources.webllm) {

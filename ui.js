@@ -32,7 +32,8 @@
  * initTooltips            - wires up the floating tooltip on .sm-info elements
  * updateShortTermUI       - syncs the short-term summary textarea
  * updateCanonUI           - populates the canon display and status line
- * updateLongTermUI        - re-renders the long-term memories list and entity panel
+ * updateLongTermUI             - re-renders the long-term memories list and entity panel
+ * updateRelationshipHistoryUI  - re-renders the relationship history panel with edit/delete/add controls
  * buildTypePicker         - builds a custom type-picker widget
  * initTypePickers         - registers the document-level close handler for type pickers
  * updateEmbeddingNotice   - shows/hides the embedding inactive notice
@@ -44,6 +45,7 @@
  * updateEntityPanel       - renders the entity registry panel
  * showEntityTimeline      - shows an inline timeline for a single entity
  * renderMemoriesList      - renders the long-term memories list with edit/delete controls
+ * updateEpistemicUI       - re-renders the Perspectives & Secrets entry list with add/edit/delete controls
  */
 
 import { extension_prompts, saveSettingsDebounced } from '../../../../script.js';
@@ -61,8 +63,18 @@ import {
   PROMPT_KEY_SCENES,
   PROMPT_KEY_ARCS,
   PROMPT_KEY_PROFILES,
+  PROMPT_KEY_RELATIONSHIPS,
+  PROMPT_KEY_EPISTEMIC,
+  PROMPT_KEY_STATE_LEDGER,
 } from './constants.js';
-import { loadCharacterMemories, saveCharacterMemories, injectMemories } from './longterm.js';
+import {
+  loadCharacterMemories,
+  saveCharacterMemories,
+  injectMemories,
+  loadRelationshipHistory,
+  saveRelationshipHistory,
+  injectRelationshipHistory,
+} from './longterm.js';
 import { loadSessionMemories, saveSessionMemories, injectSessionMemories } from './session.js';
 import { loadSceneHistory } from './scenes.js';
 import {
@@ -72,7 +84,12 @@ import {
   injectArcs,
   promoteArc,
   demoteArc,
+  reopenArc,
   loadArcSummaries,
+  loadPersistentArcs,
+  savePersistentArcs,
+  loadGroupPersistentArcs,
+  saveGroupPersistentArcs,
 } from './arcs.js';
 import { loadCanon } from './canon.js';
 import { loadProfiles } from './profiles.js';
@@ -87,6 +104,29 @@ import {
 } from './graph-migration.js';
 import { getUnifiedTierBreakdown } from './unified-inject.js';
 import { hasEmbeddingFailed } from './embeddings.js';
+import {
+  getTierTrimStats,
+  hasAnyTrimmedTier,
+  hasTrimToastFired,
+  markTrimToastFired,
+  isChatLoadComplete,
+} from './trim-stats.js';
+import {
+  loadEpistemicKnowledge,
+  saveEpistemicKnowledge,
+  injectEpistemicKnowledge,
+  shrinkEpistemicBudgetIfPossible,
+} from './epistemic.js';
+import {
+  getStateCard,
+  setStateCard,
+  deleteStateCard,
+  migrateStateLedgerKey,
+  isStateLedgerEnabled,
+  injectStateLedger,
+  STATE_CARD_FIELDS,
+  STATE_CARD_TYPES,
+} from './state-ledger.js';
 
 // ---- Local helpers (not exported) ----------------------------------------
 
@@ -115,27 +155,46 @@ function getSelectedCharacterName() {
 
 // ---- Constants -----------------------------------------------------------
 
+// Tier colours use OKLCH for perceptual uniformity: 10 hues at 36-degree
+// intervals (360/10) with fixed lightness and chroma give maximum perceptual
+// separation regardless of the display. oklch(62% 0.14 H).
+const TIER_COLORS = {
+  relationships: 'oklch(62% 0.14 0)',
+  scenes: 'oklch(62% 0.14 36)',
+  state: 'oklch(62% 0.14 72)',
+  epistemic: 'oklch(62% 0.14 108)',
+  shortterm: 'oklch(62% 0.14 144)',
+  profiles: 'oklch(62% 0.14 180)',
+  canon: 'oklch(62% 0.14 216)',
+  longterm: 'oklch(62% 0.14 252)',
+  session: 'oklch(62% 0.14 288)',
+  arcs: 'oklch(62% 0.14 324)',
+};
+
 /**
  * Metadata for each injection tier used by the token usage display.
  * Order determines the visual stacking order in the bar chart.
  */
 export const TOKEN_TIERS = [
-  { key: PROMPT_KEY_LONG, label: 'Long-term', color: '#4a6fa5' },
-  { key: PROMPT_KEY_SESSION, label: 'Session', color: '#8e5a8e' },
-  { key: PROMPT_KEY_SHORT, label: 'Short-term', color: '#5a8e5a' },
-  { key: PROMPT_KEY_CANON, label: 'Canon', color: '#a05870' },
-  { key: PROMPT_KEY_SCENES, label: 'Scenes', color: '#a07840' },
-  { key: PROMPT_KEY_ARCS, label: 'Arcs', color: '#7a6ea5' },
-  { key: PROMPT_KEY_PROFILES, label: 'Profiles', color: '#5a9ea0' },
+  { key: PROMPT_KEY_LONG, label: 'Long-term', color: TIER_COLORS.longterm },
+  { key: PROMPT_KEY_SESSION, label: 'Session', color: TIER_COLORS.session },
+  { key: PROMPT_KEY_SHORT, label: 'Short-term', color: TIER_COLORS.shortterm },
+  { key: PROMPT_KEY_CANON, label: 'Canon', color: TIER_COLORS.canon },
+  { key: PROMPT_KEY_SCENES, label: 'Scenes', color: TIER_COLORS.scenes },
+  { key: PROMPT_KEY_ARCS, label: 'Arcs', color: TIER_COLORS.arcs },
+  { key: PROMPT_KEY_PROFILES, label: 'Profiles', color: TIER_COLORS.profiles },
+  { key: PROMPT_KEY_RELATIONSHIPS, label: 'Relationships', color: TIER_COLORS.relationships },
+  { key: PROMPT_KEY_EPISTEMIC, label: 'Perspectives', color: TIER_COLORS.epistemic },
+  { key: PROMPT_KEY_STATE_LEDGER, label: 'State', color: TIER_COLORS.state },
 ];
 
 // Personal tiers shown in per-character group rows. Shared tiers (session,
 // scenes, arcs, short-term) are omitted - they are identical across all group
 // members and already represented in the top bar.
 export const PERSONAL_TIERS = [
-  { key: 'longterm', label: 'Long-term', color: '#4a6fa5' },
-  { key: 'canon', label: 'Canon', color: '#a05870' },
-  { key: 'profiles', label: 'Profiles', color: '#5a9ea0' },
+  { key: 'longterm', label: 'Long-term', color: TIER_COLORS.longterm },
+  { key: 'canon', label: 'Canon', color: TIER_COLORS.canon },
+  { key: 'profiles', label: 'Profiles', color: TIER_COLORS.profiles },
 ];
 
 // ---- Display functions ---------------------------------------------------
@@ -229,10 +288,22 @@ export function updateTokenDisplay() {
     const widthPct = total > 0 ? ((tier.tokens / total) * 100).toFixed(1) : 0;
     const sharePct = total > 0 ? ((tier.tokens / total) * 100).toFixed(0) : 0;
     const seg = document.createElement('div');
-    seg.className = 'sm-token-segment';
     seg.style.width = `${widthPct}%`;
     seg.style.background = tier.color;
-    seg.title = `${tier.label}: ~${tier.tokens.toLocaleString()} tokens (${sharePct}%)`;
+
+    const trimStats = getTierTrimStats(tier.key);
+    const isTrimmed = trimStats && trimStats.full > trimStats.injected;
+    seg.className = isTrimmed ? 'sm-token-segment sm-token-trimmed' : 'sm-token-segment';
+
+    if (isTrimmed) {
+      const dropped = trimStats.full - trimStats.injected;
+      seg.title =
+        `${tier.label}: ~${tier.tokens.toLocaleString()} tokens injected (${sharePct}%)\n` +
+        `~${dropped.toLocaleString()} tokens trimmed to fit budget`;
+    } else {
+      seg.title = `${tier.label}: ~${tier.tokens.toLocaleString()} tokens (${sharePct}%)`;
+    }
+
     bar.appendChild(seg);
   }
 
@@ -243,6 +314,18 @@ export function updateTokenDisplay() {
   if (usedEl) usedEl.textContent = `~${total.toLocaleString()}`;
   if (maxEl) maxEl.textContent = maxContext ? maxContext.toLocaleString() : '?';
   if (pctEl) pctEl.textContent = contextPct;
+
+  // Fire a one-time notification the first time any tier is found to be trimming
+  // content. Users who never open the settings panel will still see this once,
+  // prompting them to check the token bar. Subsequent calls are silent.
+  if (isChatLoadComplete() && hasAnyTrimmedTier() && !hasTrimToastFired()) {
+    markTrimToastFired();
+    toastr.warning(
+      'One or more memory tiers are trimming content to stay within budget. Check the token bar in Smart Memory settings.',
+      'Smart Memory',
+      { timeOut: 8000, extendedTimeOut: 4000, closeButton: true },
+    );
+  }
 
   // ---- Per-character rows (group chats only) ------------------------------
 
@@ -457,6 +540,70 @@ export function updateLongTermUI(characterName) {
 }
 
 /**
+ * Renders the relationship history panel for the given character.
+ * Each pair is shown as an editable row with subject, arrow, target,
+ * descriptors, magnitude, and delete/edit controls.
+ * @param {string|null} characterName
+ */
+export function updateRelationshipHistoryUI(characterName) {
+  const $list = $('#sm_relationships_list');
+  $list.empty();
+
+  const history = characterName ? loadRelationshipHistory(characterName) : {};
+  const pairs = Object.entries(history);
+
+  if (pairs.length === 0) {
+    $list.append('<div class="sm_no_char">No relationship history yet.</div>');
+    return;
+  }
+
+  for (const [key, state] of pairs) {
+    const [subject, target] = key.split('→').map((s) => s.trim());
+    const descriptors = state.descriptors ?? [];
+    // Display as "word(magnitude), word(magnitude)" for per-descriptor magnitudes.
+    const descriptorStr = descriptors.map((d) => `${d.word}(${d.magnitude})`).join(', ');
+    // For the edit form, serialize as "word(magnitude), ..." so it round-trips cleanly.
+    const descriptorFieldVal = descriptorStr;
+
+    const $row = $('<div class="sm_memory_item">');
+
+    const $content = $('<div class="sm_memory_content">').text(
+      `${subject} → ${target}: ${descriptorStr}`,
+    );
+
+    const $editBtn = $('<button class="sm_memory_action menu_button" title="Edit">')
+      .append('<i class="fa-solid fa-pencil"></i>')
+      .on('click', () => {
+        // Populate the add form for editing this pair.
+        $('#sm_rel_subject').val(subject);
+        $('#sm_rel_target').val(target);
+        $('#sm_rel_descriptors').val(descriptorFieldVal);
+        $('#sm_relationship_add_form').show();
+        // Store the key being edited so save can delete the old one.
+        $('#sm_relationship_add_form').data('editing', key);
+        $('#sm_rel_subject').focus();
+      });
+
+    const $deleteBtn = $(
+      '<button class="sm_memory_action sm_memory_delete menu_button" title="Delete">',
+    )
+      .append('<i class="fa-solid fa-trash-can"></i>')
+      .on('click', async () => {
+        const h = loadRelationshipHistory(characterName);
+        delete h[key];
+        saveRelationshipHistory(characterName, h);
+        saveSettingsDebounced();
+        injectRelationshipHistory(characterName);
+        updateRelationshipHistoryUI(characterName);
+        updateTokenDisplay();
+      });
+
+    $row.append($content, $editBtn, $deleteBtn);
+    $list.append($row);
+  }
+}
+
+/**
  * Builds a custom type-picker widget to replace the native <select>.
  * Native selects don't allow reliable per-option background styling in
  * Chromium/Electron because the select's own background bleeds into the
@@ -582,6 +729,7 @@ export function updateSessionUI() {
                 <span class="sm_memory_expiration sm_expiration_${expiration}" title="Expires: ${expiration}">${expiration}</span>
                 ${retiredBadge}${supersededByLink}${conflictBadge}
                 <span class="sm_memory_text">${$('<div>').text(mem.content).html()}</span>
+                ${Array.isArray(mem.source_messages) && mem.source_messages.length > 0 ? `<button class="sm_jump_source menu_button" data-source-start="${mem.source_messages[mem.source_messages.length - 1][0]}" data-source-end="${mem.source_messages[mem.source_messages.length - 1][1]}" title="Jump to source message"><i class="fa-solid fa-arrow-up-right-from-square"></i></button>` : ''}
                 <button class="sm_edit_session_memory menu_button" data-index="${idx}" title="Edit this memory" ${isRetired ? 'style="display:none"' : ''}>
                     <i class="fa-solid fa-pencil"></i>
                 </button>
@@ -609,6 +757,32 @@ export function updateSessionUI() {
     $target[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
     $target.addClass('sm_memory_highlight');
     setTimeout(() => $target.removeClass('sm_memory_highlight'), 1500);
+  });
+
+  $list.find('.sm_jump_source').on('click', function () {
+    const startIdx = parseInt($(this).data('source-start'), 10);
+    const endIdx = parseInt($(this).data('source-end'), 10);
+    const $startMsg = $(`#chat .mes[mesid="${startIdx}"]`);
+    if (!$startMsg.length) return;
+    // Close the extensions panel so the chat is visible when the scroll lands.
+    if ($('#rm_extensions_block').hasClass('openDrawer')) {
+      $('#extensions-settings-button .drawer-toggle').trigger('click');
+    }
+    // Scroll to the first message in the source range.
+    setTimeout(() => {
+      const $chat = $('#chat');
+      const scrollTarget = $startMsg.offset().top - $chat.offset().top + $chat.scrollTop();
+      $chat.animate({ scrollTop: scrollTarget }, 400);
+      // Flash all messages in the range so the user can see what produced this memory.
+      const FLASH_DURATION_MS = 2400; // 3 pulses × 0.8 s each
+      for (let i = startIdx; i <= endIdx; i++) {
+        const $m = $(`#chat .mes[mesid="${i}"]`);
+        if ($m.length) {
+          $m.addClass('sm_source_flash');
+          setTimeout(() => $m.removeClass('sm_source_flash'), FLASH_DURATION_MS);
+        }
+      }
+    }, 300);
   });
 
   $list.find('.sm_edit_session_memory').on('click', async function () {
@@ -716,33 +890,86 @@ export function updateScenesUI() {
 export function updateArcsUI() {
   const arcs = loadArcs();
   const $list = $('#sm_arcs_list');
+  const $resolvedList = $('#sm_resolved_arcs_list');
+  const $resolvedSection = $('#sm_resolved_arcs_section');
   $list.empty();
+  $resolvedList.empty();
 
-  // Only solo chats support persistent arcs - group chats have no single character.
-  const charName = getContext().groupId ? null : getCurrentCharacterName();
+  const ctx = getContext();
+  const groupId = ctx.groupId ?? null;
+  const charName = groupId ? null : getCurrentCharacterName();
+  const canPin = !!(charName || groupId);
 
-  if (arcs.length === 0) {
+  const activeArcs = arcs.filter((a) => !a.resolved);
+  const resolvedArcs = arcs.filter((a) => a.resolved);
+
+  if (activeArcs.length === 0) {
     $list.append('<div class="sm_no_char">No open story threads.</div>');
   }
 
   arcs.forEach((arc, idx) => {
     const isPersistent = !!arc.persistent;
-    const pinTitle = isPersistent
-      ? 'Unpin - keep only in this chat'
-      : 'Pin - carry this thread into future chats';
-    const $item = $(`
-            <div class="sm_arc_item${isPersistent ? ' sm_arc_persistent' : ''}" data-index="${idx}">
-                <span class="sm_arc_text">${$('<div>').text(arc.content).html()}</span>
-                ${charName ? `<button class="sm_pin_arc menu_button${isPersistent ? ' sm_pin_active' : ''}" data-index="${idx}" title="${pinTitle}"><i class="fa-solid fa-thumbtack"></i></button>` : ''}
-                <button class="sm_edit_arc menu_button" data-index="${idx}" title="Edit this arc">
-                    <i class="fa-solid fa-pencil"></i>
-                </button>
-                <button class="sm_delete_arc menu_button" data-index="${idx}" title="Resolve / remove this arc">
-                    <i class="fa-solid fa-check"></i>
-                </button>
-            </div>
-        `);
-    $list.append($item);
+    const isResolved = !!arc.resolved;
+
+    if (isResolved) {
+      const $item = $(`
+              <div class="sm_arc_item sm_arc_persistent sm_arc_resolved" data-index="${idx}">
+                  <span class="sm_arc_text">${$('<div>').text(arc.content).html()}</span>
+                  <button class="sm_reopen_arc menu_button" data-index="${idx}" title="Re-open this thread"><i class="fa-solid fa-rotate-left"></i></button>
+                  <button class="sm_remove_resolved_arc menu_button" data-index="${idx}" title="Remove"><i class="fa-solid fa-xmark"></i></button>
+              </div>
+          `);
+      $resolvedList.append($item);
+    } else {
+      const pinTitle = isPersistent
+        ? 'Unpin - keep only in this chat'
+        : 'Pin - carry this thread into future chats';
+      const $item = $(`
+              <div class="sm_arc_item${isPersistent ? ' sm_arc_persistent' : ''}" data-index="${idx}">
+                  <span class="sm_arc_text">${$('<div>').text(arc.content).html()}</span>
+                  ${canPin ? `<button class="sm_pin_arc menu_button${isPersistent ? ' sm_pin_active' : ''}" data-index="${idx}" title="${pinTitle}"><i class="fa-solid fa-thumbtack"></i></button>` : ''}
+                  <button class="sm_edit_arc menu_button" data-index="${idx}" title="Edit this arc">
+                      <i class="fa-solid fa-pencil"></i>
+                  </button>
+                  <button class="sm_delete_arc menu_button" data-index="${idx}" title="Resolve / remove this arc">
+                      <i class="fa-solid fa-check"></i>
+                  </button>
+              </div>
+          `);
+      $list.append($item);
+    }
+  });
+
+  // Show the resolved section only when there are resolved arcs.
+  $resolvedSection.toggle(resolvedArcs.length > 0);
+
+  $resolvedList.find('.sm_reopen_arc').on('click', async function () {
+    const idx = parseInt($(this).data('index'), 10);
+    await reopenArc(idx, charName, groupId);
+    injectArcs();
+    updateArcsUI();
+  });
+
+  $resolvedList.find('.sm_remove_resolved_arc').on('click', async function () {
+    const idx = parseInt($(this).data('index'), 10);
+    const arc = loadArcs()[idx];
+    if (!arc) return;
+    await deleteArc(idx, charName);
+    if (groupId) {
+      const gP = loadGroupPersistentArcs(groupId);
+      saveGroupPersistentArcs(
+        groupId,
+        gP.filter((p) => p.content !== arc.content),
+      );
+    } else if (charName) {
+      const cP = loadPersistentArcs(charName);
+      savePersistentArcs(
+        charName,
+        cP.filter((p) => p.content !== arc.content),
+      );
+    }
+    injectArcs();
+    updateArcsUI();
   });
 
   $list.find('.sm_pin_arc').on('click', async function () {
@@ -750,9 +977,9 @@ export function updateArcsUI() {
     const arc = loadArcs()[idx];
     if (!arc) return;
     if (arc.persistent) {
-      await demoteArc(idx, charName);
+      await demoteArc(idx, charName, groupId);
     } else {
-      await promoteArc(idx, charName);
+      await promoteArc(idx, charName, groupId);
     }
     injectArcs();
     updateArcsUI();
@@ -781,8 +1008,29 @@ export function updateArcsUI() {
       if (!newContent) return;
       const arcs = loadArcs();
       if (!arcs[idx]) return;
+      const oldContent = arcs[idx].content;
+      const isPersistent = !!arcs[idx].persistent;
       arcs[idx].content = newContent;
       await saveArcs(arcs);
+      // Mirror content edits into the persistent store so the updated text
+      // carries into future chats instead of the old version resurfacing.
+      if (isPersistent) {
+        if (groupId) {
+          const gPersistent = loadGroupPersistentArcs(groupId);
+          const match = gPersistent.find((p) => p.content === oldContent);
+          if (match) {
+            match.content = newContent;
+            saveGroupPersistentArcs(groupId, gPersistent);
+          }
+        } else if (charName) {
+          const cPersistent = loadPersistentArcs(charName);
+          const match = cPersistent.find((p) => p.content === oldContent);
+          if (match) {
+            match.content = newContent;
+            savePersistentArcs(charName, cPersistent);
+          }
+        }
+      }
       injectArcs();
       updateArcsUI();
     });
@@ -835,7 +1083,7 @@ export function updateProfilesUI(profiles) {
   const sections = [
     { key: 'character_state', label: 'Character state' },
     { key: 'world_state', label: 'World state' },
-    { key: 'relationship_matrix', label: 'Relationships' },
+    { key: 'relationship_matrix', label: 'Current Relationships' },
   ];
 
   let hasContent = false;
@@ -964,6 +1212,8 @@ export function updateEntityPanel(characterName) {
           const sessReg = loadSessionEntityRegistry();
           setEntityType(entity.id, t, ltReg);
           setEntityType(entity.id, t, sessReg);
+          // Migrate state card to the new key so it stays coupled to the entity.
+          if (t !== entity.type) await migrateStateLedgerKey(entity.name, entity.type, t);
           await persistAndRefresh();
         });
         $picker.append($opt);
@@ -999,6 +1249,59 @@ export function updateEntityPanel(characterName) {
         $opt.on('click', async (ev) => {
           ev.stopPropagation();
           $picker.remove();
+
+          const srcCard = getStateCard(entity.name, entity.type);
+          const dstCard = getStateCard(target.name, target.type);
+
+          // If both entities have state cards and the ledger is enabled, ask which to keep.
+          // When the ledger is disabled, silently keep the destination card.
+          if (isStateLedgerEnabled() && srcCard && dstCard) {
+            const $modal = $(`
+              <div class="sm_state_merge_modal">
+                <div class="sm_state_merge_modal_inner">
+                  <div class="sm_state_merge_title">Both entities have state cards</div>
+                  <div class="sm_state_merge_body">
+                    Merging <strong>${$('<span>').text(entity.name).html()}</strong> into
+                    <strong>${$('<span>').text(target.name).html()}</strong> will discard one state card.
+                    Which card should survive?
+                  </div>
+                  <div class="sm_state_merge_actions">
+                    <button class="menu_button sm_state_keep_src">Keep "${$('<span>').text(entity.name).html()}" card</button>
+                    <button class="menu_button sm_state_keep_dst">Keep "${$('<span>').text(target.name).html()}" card</button>
+                    <button class="menu_button sm_state_cancel">Cancel</button>
+                  </div>
+                </div>
+              </div>
+            `);
+
+            const doMerge = async (keepSrc) => {
+              $modal.remove();
+              const ltReg = characterName ? loadCharacterEntityRegistry(characterName) : [];
+              const ltMems = characterName ? loadCharacterMemories(characterName) : [];
+              const sessReg = loadSessionEntityRegistry();
+              const sessMems = loadSessionMemories();
+              mergeEntitiesById(entity.id, target.id, ltReg, ltMems, sessReg, sessMems);
+              if (characterName) {
+                saveCharacterEntityRegistry(characterName, ltReg);
+                saveCharacterMemories(characterName, ltMems);
+              }
+              await saveSessionEntityRegistry(sessReg);
+              await saveSessionMemories(sessMems);
+              // Discard the loser card, copy the winner card to the surviving key.
+              await deleteStateCard(entity.name, entity.type);
+              await deleteStateCard(target.name, target.type);
+              const winnerFields = keepSrc ? srcCard : dstCard;
+              await setStateCard(target.name, target.type, winnerFields);
+              await persistAndRefresh();
+            };
+
+            $modal.find('.sm_state_keep_src').on('click', () => doMerge(true));
+            $modal.find('.sm_state_keep_dst').on('click', () => doMerge(false));
+            $modal.find('.sm_state_cancel').on('click', () => $modal.remove());
+            $('body').append($modal);
+            return;
+          }
+
           const ltReg = characterName ? loadCharacterEntityRegistry(characterName) : [];
           const ltMems = characterName ? loadCharacterMemories(characterName) : [];
           const sessReg = loadSessionEntityRegistry();
@@ -1010,6 +1313,11 @@ export function updateEntityPanel(characterName) {
           }
           await saveSessionEntityRegistry(sessReg);
           await saveSessionMemories(sessMems);
+          // If only the source had a card, copy it to the surviving (target) key.
+          if (srcCard) {
+            await deleteStateCard(entity.name, entity.type);
+            await setStateCard(target.name, target.type, srcCard);
+          }
           await persistAndRefresh();
         });
         $picker.append($opt);
@@ -1033,22 +1341,146 @@ export function updateEntityPanel(characterName) {
     $row.find('.sm_entity_delete_btn').on('click', async (e) => {
       e.stopPropagation();
       $panel.find('.sm_entity_type_picker').remove();
-      const ltReg = characterName ? loadCharacterEntityRegistry(characterName) : [];
-      const ltMems = characterName ? loadCharacterMemories(characterName) : [];
-      const sessReg = loadSessionEntityRegistry();
-      const sessMems = loadSessionMemories();
-      deleteEntityById(entity.id, ltReg, ltMems);
-      deleteEntityById(entity.id, sessReg, sessMems);
-      if (characterName) {
-        saveCharacterEntityRegistry(characterName, ltReg);
-        saveCharacterMemories(characterName, ltMems);
+
+      const doDelete = async () => {
+        const ltReg = characterName ? loadCharacterEntityRegistry(characterName) : [];
+        const ltMems = characterName ? loadCharacterMemories(characterName) : [];
+        const sessReg = loadSessionEntityRegistry();
+        const sessMems = loadSessionMemories();
+        deleteEntityById(entity.id, ltReg, ltMems);
+        deleteEntityById(entity.id, sessReg, sessMems);
+        if (characterName) {
+          saveCharacterEntityRegistry(characterName, ltReg);
+          saveCharacterMemories(characterName, ltMems);
+        }
+        await saveSessionEntityRegistry(sessReg);
+        await saveSessionMemories(sessMems);
+        // Clean up any associated state card.
+        if (STATE_CARD_TYPES.has(entity.type)) await deleteStateCard(entity.name, entity.type);
+        await persistAndRefresh();
+      };
+
+      // Warn before discarding a populated state card - only when the ledger is enabled.
+      // When disabled, the card is silently deleted alongside the entity.
+      if (
+        isStateLedgerEnabled() &&
+        STATE_CARD_TYPES.has(entity.type) &&
+        getStateCard(entity.name, entity.type)
+      ) {
+        $row.find('.sm_delete_state_warning').remove();
+        const $warn = $(`
+          <div class="sm_delete_state_warning">
+            <span>This entity has a state card. Delete anyway?</span>
+            <button class="menu_button sm_delete_anyway">Delete</button>
+            <button class="menu_button sm_delete_cancel">Cancel</button>
+          </div>
+        `);
+        $warn.find('.sm_delete_anyway').on('click', async () => {
+          $warn.remove();
+          await doDelete();
+        });
+        $warn.find('.sm_delete_cancel').on('click', () => $warn.remove());
+        $row.append($warn);
+        return;
       }
-      await saveSessionEntityRegistry(sessReg);
-      await saveSessionMemories(sessMems);
-      await persistAndRefresh();
+
+      await doDelete();
     });
 
     $panel.append($row);
+
+    // State card subsection - only when the ledger is enabled and the entity type supports state cards.
+    if (isStateLedgerEnabled() && STATE_CARD_TYPES.has(entity.type)) {
+      const fields = STATE_CARD_FIELDS[entity.type] ?? [];
+      const existingCard = getStateCard(entity.name, entity.type);
+
+      const $section = $('<div class="sm_state_card_section">');
+
+      // Summary header line: shows populated fields or a placeholder.
+      const summaryParts = existingCard
+        ? fields.filter((f) => existingCard[f]).map((f) => `${f}: ${existingCard[f]}`)
+        : [];
+      const summaryText = summaryParts.length > 0 ? summaryParts.join(' | ') : 'No state card';
+      const $header = $(
+        `<div class="sm_state_card_header sm-muted">${$('<div>').text(summaryText).html()}</div>`,
+      );
+
+      const $editBtn = $(
+        `<button class="sm_state_card_edit_btn menu_button" title="${existingCard ? 'Edit state card' : 'Add state card'}">
+          <i class="fa-solid ${existingCard ? 'fa-pen' : 'fa-plus'}"></i>
+        </button>`,
+      );
+
+      const $headerRow = $('<div class="sm_state_card_header_row">');
+      $headerRow.append($header, $editBtn);
+      $section.append($headerRow);
+
+      // Editor: hidden until the edit button is clicked.
+      const $editor = $('<div class="sm_state_card_editor" style="display:none;">');
+      const $inputs = {};
+      for (const f of fields) {
+        const $field = $('<div class="sm_state_card_field">');
+        const label = f.replace(/_/g, ' ');
+        const currentVal = existingCard?.[f] ?? '';
+        const safeId = `sm_sc_${entity.id}_${f}`;
+        $field.append(`<label for="${safeId}">${label}</label>`);
+        const $inp = $(`<input type="text" id="${safeId}" class="text_pole" value="">`);
+        $inp.val(currentVal);
+        $field.append($inp);
+        $inputs[f] = $inp;
+        $editor.append($field);
+      }
+
+      const $actions = $('<div class="sm_state_card_actions">');
+      const $saveBtn = $('<button class="menu_button">Save</button>');
+      const $cancelBtn = $('<button class="menu_button">Cancel</button>');
+      const $clearBtn = $(
+        '<button class="menu_button sm_state_card_clear_btn">Clear card</button>',
+      );
+      $actions.append($saveBtn, $cancelBtn, existingCard ? $clearBtn : null);
+      $editor.append($actions);
+      $section.append($editor);
+
+      $editBtn.on('click', (e) => {
+        e.stopPropagation();
+        const opening = !$editor.is(':visible');
+        $editor.toggle(opening);
+        const $icon = $editBtn.find('i');
+        if (opening) {
+          $icon.removeClass('fa-pen fa-plus').addClass('fa-times');
+        } else {
+          $icon.removeClass('fa-times').addClass(existingCard ? 'fa-pen' : 'fa-plus');
+        }
+      });
+
+      $saveBtn.on('click', async (e) => {
+        e.stopPropagation();
+        const newFields = {};
+        for (const f of fields) {
+          const v = ($inputs[f].val() ?? '').trim();
+          if (v) newFields[f] = v;
+        }
+        await setStateCard(entity.name, entity.type, newFields);
+        injectStateLedger();
+        updateEntityPanel(characterName);
+        updateTokenDisplay();
+      });
+
+      $cancelBtn.on('click', (e) => {
+        e.stopPropagation();
+        $editor.hide();
+      });
+
+      $clearBtn.on('click', async (e) => {
+        e.stopPropagation();
+        await deleteStateCard(entity.name, entity.type);
+        injectStateLedger();
+        updateEntityPanel(characterName);
+        updateTokenDisplay();
+      });
+
+      $panel.append($section);
+    }
   }
 }
 
@@ -1184,6 +1616,7 @@ export function renderMemoriesList(memories, characterName) {
                 <span class="sm_memory_expiration sm_expiration_${expiration}" title="Expires: ${expiration}">${expiration}</span>
                 ${retiredBadge}${supersededByLink}${conflictBadge}
                 <span class="sm_memory_text">${$('<div>').text(mem.content).html()}</span>
+                ${Array.isArray(mem.source_messages) && mem.source_messages.length > 0 && mem.source_chat_id === getContext().chatId ? `<button class="sm_jump_source menu_button" data-source-start="${mem.source_messages[mem.source_messages.length - 1][0]}" data-source-end="${mem.source_messages[mem.source_messages.length - 1][1]}" title="Jump to source message"><i class="fa-solid fa-arrow-up-right-from-square"></i></button>` : ''}
                 <button class="sm_edit_memory menu_button" data-index="${idx}" title="Edit this memory" ${isRetired ? 'style="display:none"' : ''}>
                     <i class="fa-solid fa-pencil"></i>
                 </button>
@@ -1212,6 +1645,32 @@ export function renderMemoriesList(memories, characterName) {
     $target[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
     $target.addClass('sm_memory_highlight');
     setTimeout(() => $target.removeClass('sm_memory_highlight'), 1500);
+  });
+
+  $list.find('.sm_jump_source').on('click', function () {
+    const startIdx = parseInt($(this).data('source-start'), 10);
+    const endIdx = parseInt($(this).data('source-end'), 10);
+    const $startMsg = $(`#chat .mes[mesid="${startIdx}"]`);
+    if (!$startMsg.length) return;
+    // Close the extensions panel so the chat is visible when the scroll lands.
+    if ($('#rm_extensions_block').hasClass('openDrawer')) {
+      $('#extensions-settings-button .drawer-toggle').trigger('click');
+    }
+    // Scroll to the first message in the source range.
+    setTimeout(() => {
+      const $chat = $('#chat');
+      const scrollTarget = $startMsg.offset().top - $chat.offset().top + $chat.scrollTop();
+      $chat.animate({ scrollTop: scrollTarget }, 400);
+      // Flash all messages in the range so the user can see what produced this memory.
+      const FLASH_DURATION_MS = 2400; // 3 pulses × 0.8 s each
+      for (let i = startIdx; i <= endIdx; i++) {
+        const $m = $(`#chat .mes[mesid="${i}"]`);
+        if ($m.length) {
+          $m.addClass('sm_source_flash');
+          setTimeout(() => $m.removeClass('sm_source_flash'), FLASH_DURATION_MS);
+        }
+      }
+    }, 300);
   });
 
   $list.find('.sm_edit_memory').on('click', function () {
@@ -1295,4 +1754,125 @@ export function renderMemoriesList(memories, characterName) {
     injectMemories(characterName).catch(console.error);
     renderMemoriesList(loadCharacterMemories(characterName), characterName);
   });
+}
+
+// ---- Perspectives & Secrets UI ------------------------------------------
+
+const EPISTEMIC_TYPE_LABELS = {
+  knows: 'Knows',
+  suspects: 'Suspects',
+  unaware: 'Unaware',
+  believes: 'Believes (false)',
+  hiding: 'Hiding',
+};
+
+/**
+ * Re-renders the Perspectives & Secrets entry list for a character.
+ * Each entry gets an edit and delete button. An add form is appended after the list.
+ * believes and hiding entries are grouped behind a spoiler to avoid unintentional
+ * player-side reveals in collaborative RP.
+ *
+ * @param {string|null} characterName - Card character name (storage key).
+ */
+export function updateEpistemicUI(characterName) {
+  const $list = $('#sm_epistemic_list');
+  $list.empty();
+
+  const entries = characterName ? loadEpistemicKnowledge(characterName) : [];
+
+  if (entries.length === 0) {
+    $list.append('<div class="sm_no_char">No perspective entries yet.</div>');
+    return;
+  }
+
+  const spoilerTypes = new Set(['believes', 'hiding']);
+  const open = entries.filter((e) => !spoilerTypes.has(e.type));
+  const secret = entries.filter((e) => spoilerTypes.has(e.type));
+
+  /**
+   * Builds and appends a single entry row to a target container.
+   * @param {Object} entry
+   * @param {jQuery} $target
+   */
+  function appendEntryRow(entry, $target) {
+    const typeLabel = EPISTEMIC_TYPE_LABELS[entry.type] ?? entry.type;
+    const displayText =
+      entry.type === 'hiding'
+        ? `${entry.subject} / ${typeLabel} from ${entry.target}: ${entry.content}`
+        : `${entry.subject} / ${typeLabel}: ${entry.content}`;
+
+    const $row = $('<div class="sm_memory_item">');
+    const $content = $('<div class="sm_memory_content">').text(displayText);
+
+    const $editBtn = $('<button class="sm_memory_action menu_button" title="Edit">')
+      .append('<i class="fa-solid fa-pencil"></i>')
+      .on('click', () => {
+        $('#sm_ep_type').val(entry.type);
+        $('#sm_ep_subject').val(entry.subject);
+        $('#sm_ep_target').val(entry.target ?? '');
+        $('#sm_ep_content').val(entry.content);
+        // Show target field only for hiding type.
+        $('.sm_ep_target_field').toggle(entry.type === 'hiding');
+        $('#sm_epistemic_add_form').data('editing', entry.id).show();
+        $('#sm_ep_subject').focus();
+      });
+
+    const $deleteBtn = $(
+      '<button class="sm_memory_action sm_memory_delete menu_button" title="Delete">',
+    )
+      .append('<i class="fa-solid fa-trash-can"></i>')
+      .on('click', () => {
+        const current = loadEpistemicKnowledge(characterName);
+        saveEpistemicKnowledge(
+          characterName,
+          current.filter((e) => e.id !== entry.id),
+        );
+        shrinkEpistemicBudgetIfPossible(characterName, characterName);
+        injectEpistemicKnowledge(characterName, characterName);
+        updateEpistemicUI(characterName);
+        updateTokenDisplay();
+      });
+
+    $row.append($content, $editBtn, $deleteBtn);
+    $target.append($row);
+  }
+
+  for (const entry of open) appendEntryRow(entry, $list);
+
+  // Always render the spoiler block so the user knows it exists and can tell
+  // whether any believes/hiding entries were extracted.
+  const $details = $('<details class="sm_epistemic_spoiler">');
+  const $summary = $(`
+    <summary class="sm_epistemic_spoiler_summary">
+      <span class="sm_spoiler_closed"><i class="fa-solid fa-lock"></i> Spoiler - false beliefs and hidden secrets <em>(click to reveal)</em></span>
+      <span class="sm_spoiler_open"><i class="fa-solid fa-lock-open"></i> False beliefs and hidden secrets <em>(click to hide)</em></span>
+    </summary>
+  `);
+
+  // Intercept the open action to warn before revealing spoiler content.
+  // Closing needs no confirmation - the user has already seen the content.
+  $summary.on('click', (e) => {
+    if (!$details.prop('open')) {
+      e.preventDefault();
+      if (
+        confirm(
+          'This will reveal hidden character secrets - false beliefs and things the character is concealing.\n\nOpen spoiler?',
+        )
+      ) {
+        $details.prop('open', true);
+      }
+    }
+  });
+
+  $details.append($summary);
+
+  if (secret.length === 0) {
+    $details.append(
+      '<div class="sm_no_char" style="padding: 4px 0;">No false beliefs or hidden secrets found.</div>',
+    );
+  } else {
+    for (const entry of secret) appendEntryRow(entry, $details);
+  }
+
+  $list.append($details);
 }

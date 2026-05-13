@@ -25,6 +25,7 @@
  * completed scene and appends it to the per-chat scene history in chatMetadata.
  *
  * detectSceneBreakHeuristic  - pattern-based scene break check (cheap, no model call); includes dawn/sleep/wake patterns
+ * detectSceneBreakAI         - AI yes/no check for scene breaks; used when scene_ai_detect is enabled
  * loadSceneHistory           - returns the stored scene history array
  * saveSceneHistory           - persists the scene history array to chatMetadata
  * clearSceneHistory          - empties scene history for the current chat
@@ -33,6 +34,7 @@
  * processSceneBreak          - orchestrates detection + summarization + dedup + storage
  * linkMemoriesToLastScene    - attaches memory ids to the most recent scene entry
  * injectSceneHistory         - pushes scene history into the prompt via setExtensionPrompt
+ * getSceneParticipants       - derives the set of named characters present in a message window
  */
 
 import {
@@ -48,6 +50,8 @@ import { detectSceneBreakHeuristic } from './parsers.js';
 import { smLog } from './logging.js';
 import { getEmbeddingBatch, cosineSimilarity } from './embeddings.js';
 import { invalidateUnifiedCache } from './unified-inject.js';
+import { MACRO_NAMES, setMacroContent, isMacroActive } from './macros.js';
+import { reportTierTrimStats } from './trim-stats.js';
 
 // Re-export so index.js can import directly from scenes.js as before.
 export { detectSceneBreakHeuristic };
@@ -99,7 +103,7 @@ export async function sceneSimilarity(a, b) {
  * @param {string} [previousMessageText] - The preceding AI message for context.
  * @returns {Promise<boolean>}
  */
-async function detectSceneBreakAI(messageText, previousMessageText) {
+export async function detectSceneBreakAI(messageText, previousMessageText) {
   try {
     const prompt = buildSceneDetectPrompt(messageText, previousMessageText);
     const response = await generateMemoryExtract(prompt, { responseLength: 5 });
@@ -142,6 +146,26 @@ export async function clearSceneHistory() {
     context.chatMetadata[META_KEY].sceneHistory = [];
     await context.saveMetadata();
   }
+}
+
+/**
+ * Derives the set of named characters present in a message window.
+ * Includes the AI character and any named user personas; excludes system messages.
+ *
+ * Note: NPCs invented mid-scene appear only in prose, not as message senders, so
+ * they will not appear in this list. The extraction model reads the full prose and
+ * catches them regardless - this list is a participant hint, not an exhaustive registry.
+ *
+ * @param {Object[]} messages - Chat message objects.
+ * @returns {string[]} Deduplicated array of character names.
+ */
+export function getSceneParticipants(messages) {
+  const names = new Set();
+  for (const m of messages) {
+    if (m.is_system) continue;
+    if (m.name) names.add(m.name);
+  }
+  return [...names];
 }
 
 // ---- Scene summary ------------------------------------------------------
@@ -289,6 +313,7 @@ export async function linkMemoriesToLastScene(memoryIds) {
 export function injectSceneHistory() {
   const settings = extension_settings[MODULE_NAME];
   if (!settings.scene_enabled) {
+    setMacroContent(MACRO_NAMES.scenes, '');
     setExtensionPrompt(PROMPT_KEY_SCENES, '', extension_prompt_types.NONE, 0);
     invalidateUnifiedCache(PROMPT_KEY_SCENES);
     return;
@@ -296,6 +321,7 @@ export function injectSceneHistory() {
 
   const history = loadSceneHistory();
   if (history.length === 0) {
+    setMacroContent(MACRO_NAMES.scenes, '');
     setExtensionPrompt(PROMPT_KEY_SCENES, '', extension_prompt_types.NONE, 0);
     invalidateUnifiedCache(PROMPT_KEY_SCENES);
     return;
@@ -305,6 +331,8 @@ export function injectSceneHistory() {
   // If a single scene still exceeds the budget, hard-truncate so the injection
   // is always within the cap regardless of individual summary length.
   const budget = settings.scene_inject_budget ?? 300;
+  const fullText = history.map((sc, i) => `Scene ${i + 1}: ${sc.summary}`).join('\n');
+  const fullTokens = estimateTokens(`Previous scenes:\n${fullText}`);
   const trimmed = [...history];
   while (trimmed.length > 1) {
     const text = trimmed.map((sc, i) => `Scene ${i + 1}: ${sc.summary}`).join('\n');
@@ -318,6 +346,14 @@ export function injectSceneHistory() {
     text = text.slice(0, Math.floor(text.length * ratio)).trim();
   }
   const content = `Previous scenes:\n${text}`;
+  reportTierTrimStats(PROMPT_KEY_SCENES, estimateTokens(content), fullTokens);
+
+  setMacroContent(MACRO_NAMES.scenes, content);
+  if (isMacroActive(MACRO_NAMES.scenes)) {
+    setExtensionPrompt(PROMPT_KEY_SCENES, '', extension_prompt_types.NONE, 0);
+    invalidateUnifiedCache(PROMPT_KEY_SCENES);
+    return;
+  }
 
   setExtensionPrompt(
     PROMPT_KEY_SCENES,

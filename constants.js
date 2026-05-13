@@ -24,6 +24,16 @@
  * injection keys, and the valid memory type enums for both long-term and
  * session memory. Also exports estimateTokens for injection budget checks
  * and generateMemoryId for stable UUID assignment.
+ *
+ * PROMPT_KEY_TRIGGERED is the secondary IN_CHAT slot used by the activation
+ * triggers feature to inject contextually relevant long-term memories closer
+ * to the prompt when their trigger keywords appear in the current turn.
+ * PROMPT_KEY_RELATIONSHIPS is the slot for persistent relationship state -
+ * per-pair emotional deltas accumulated across sessions.
+ * PROMPT_KEY_EPISTEMIC is the slot for perspective-scoped knowledge - what
+ * each character knows, suspects, believes, or is concealing.
+ * PROMPT_KEY_STATE_LEDGER is the slot for structured current-state snapshots
+ * of tracked entities (characters, objects, places, factions).
  */
 
 /** Extension name as registered in extension_settings. */
@@ -45,6 +55,19 @@ export const PROMPT_KEY_CANON = 'smart_memory_canon';
 // Single unified block used when unified_injection mode is enabled.
 // All individual tier slots are cleared and their content merged here instead.
 export const PROMPT_KEY_UNIFIED = 'smart_memory_unified';
+// Secondary IN_CHAT slot for long-term memories whose activation triggers match
+// the current turn. These are injected closer to the prompt in addition to
+// appearing at the end of the main PROMPT_KEY_LONG block.
+export const PROMPT_KEY_TRIGGERED = 'smart_memory_triggered';
+// Persistent relationship state - per-pair emotional deltas accumulated across
+// sessions. Only pairs relevant to the current chat are injected.
+export const PROMPT_KEY_RELATIONSHIPS = 'smart_memory_relationships';
+// Perspective-scoped knowledge block for the responding character: what they
+// know, suspect, believe, and are concealing, extracted at scene breaks.
+export const PROMPT_KEY_EPISTEMIC = 'smart_memory_epistemic';
+// Structured current-state snapshot for tracked entities (characters, objects,
+// places, factions). Extracted and updated each extraction cycle.
+export const PROMPT_KEY_STATE_LEDGER = 'smart_memory_state_ledger';
 
 /** Valid type tags for long-term memory entries. */
 export const MEMORY_TYPES = ['fact', 'relationship', 'preference', 'event'];
@@ -69,7 +92,15 @@ export const META_KEY = 'smartMemory';
  * - Version 0 is the implicit state for any container that has no stored version
  *   (i.e. all data written by v1.3.0 or earlier, before this system existed).
  */
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 9;
+
+/**
+ * Maximum tokens any external generation source is allowed to produce for a
+ * memory task. Generous enough that thinking/reasoning models can complete
+ * their reasoning block before writing output; finite to prevent runaway
+ * generation from a model that never self-terminates.
+ */
+export const MEMORY_GENERATION_BUDGET = 8192;
 
 /**
  * Rough token estimate for a string. Uses the standard ~4 chars-per-token
@@ -83,11 +114,18 @@ export function estimateTokens(text) {
 }
 
 /**
- * Generates a stable UUID v4 for a new memory entry.
- * SillyTavern runs exclusively in modern browsers where crypto.randomUUID()
- * is always available - no fallback needed.
+ * Generates a UUID v4 for a new memory entry.
+ * Falls back to a manual implementation when crypto.randomUUID() is unavailable
+ * (non-secure HTTP contexts accessed from a remote device).
  * @returns {string} UUID v4 string.
  */
 export function generateMemoryId() {
-  return crypto.randomUUID();
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  // Manual UUID v4 fallback for non-secure contexts.
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+  });
 }

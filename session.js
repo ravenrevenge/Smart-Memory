@@ -29,7 +29,8 @@
  * saveSessionMemories        - persists the session memory array to chatMetadata
  * clearSessionMemories       - empties session memories for the current chat
  * purgeSessionMemoriesSince  - deletes all session memories with ts >= a given timestamp and repairs the entity registry
- * extractSessionMemories     - runs extraction against recent messages and merges results
+ * extractSessionMemories     - runs extraction against recent messages and merges results;
+ *                              populates LLM-suggested triggers on Profile B or when opted in
  * consolidateSessionMemories - evaluates unprocessed entries against the consolidated base per type
  * injectSessionMemories      - pushes session memories into the prompt via setExtensionPrompt
  */
@@ -55,8 +56,12 @@ import {
   resolveEntityNames,
   reconcileEntityRegistry,
 } from './graph-migration.js';
-import { buildSessionExtractionPrompt, buildSessionConsolidationPrompt } from './prompts.js';
-import { parseSessionOutput } from './parsers.js';
+import {
+  buildSessionExtractionPrompt,
+  buildSessionConsolidationPrompt,
+  buildTriggerGenerationPrompt,
+} from './prompts.js';
+import { parseSessionOutput, parseTriggerResponse } from './parsers.js';
 import {
   batchVerify,
   getEmbeddingBatch,
@@ -73,9 +78,12 @@ import {
   selectProtectedMemories,
   sortByTimeline,
   trimByPriority,
+  filterTriggersByFrequency,
 } from './memory-utils.js';
 import { smLog } from './logging.js';
 import { invalidateUnifiedCache } from './unified-inject.js';
+import { MACRO_NAMES, setMacroContent, isMacroActive } from './macros.js';
+import { reportTierTrimStats } from './trim-stats.js';
 
 /**
  * Filters session memory candidates against existing entries, removing
@@ -330,14 +338,23 @@ export async function extractSessionMemories(recentMessages, abortCheck = null) 
     } = await verifySessionCandidates(parseSessionOutput(response), existing);
     if (incoming.length === 0) return 0;
 
+    // Tag each new memory with the source message range so users can jump back
+    // to the passage that prompted the extraction.
+    const context = getContext();
+    const chatLen = context.chat?.length ?? 1;
+    const windowEnd = Math.max(0, chatLen - 2);
+    const windowStart = Math.max(0, windowEnd - recentMessages.length + 1);
+    for (const mem of incoming) {
+      mem.source_messages = [[windowStart, windowEnd]];
+    }
+
     const max = settings.session_max_memories ?? 30;
     const merged = await deduplicateSession(existing, incoming, max);
 
     // Apply supersession links. For each candidate that supersedes an existing
     // memory: mark the old memory as retired (superseded_by + valid_to) and
     // link the new memory back to it (supersedes + valid_from).
-    const context = getContext();
-    const messageIndex = Math.max(0, (context.chat?.length ?? 1) - 1);
+    const messageIndex = Math.max(0, chatLen - 1);
 
     const newlyRetiredIds = new Set();
     for (const [candText, oldId] of supersessionMap) {
@@ -383,11 +400,34 @@ export async function extractSessionMemories(recentMessages, abortCheck = null) 
       }
     }
 
+    // Profile B and opted-in Profile A: generate LLM-suggested triggers for
+    // newly added session memories. Same path as long-term, runs sequentially.
+    const existingKeys = new Set(existing.map((m) => `${m.type}|${m.content}`));
+    if (getHardwareProfile() === 'b' || settings.longterm_triggers_enabled) {
+      for (const mem of finalActive) {
+        if (existingKeys.has(`${mem.type}|${mem.content}`)) continue;
+        if (Array.isArray(mem.triggers) && mem.triggers.length > 0) continue;
+        try {
+          const triggerPrompt = buildTriggerGenerationPrompt(mem.content);
+          const triggerResponse = await generateMemoryExtract(triggerPrompt, {
+            responseLength: 60,
+          });
+          const raw = parseTriggerResponse(triggerResponse, mem.content);
+          mem.triggers = filterTriggersByFrequency(raw, finalActive);
+          smLog(
+            `[SmartMemory] Session triggers for "${mem.content.slice(0, 50)}": ${mem.triggers.join(', ')}`,
+          );
+        } catch (err) {
+          smLog(`[SmartMemory] Session trigger generation failed: ${err.message}`);
+          mem.triggers = [];
+        }
+      }
+    }
+
     // Resolve entity names to ids for any new memories that carried
     // _raw_entity_names through the pipeline. The session entity registry is
     // loaded from chatMetadata, updated in place, then persisted.
     const entityRegistry = loadSessionEntityRegistry();
-    const existingKeys = new Set(existing.map((m) => `${m.type}|${m.content}`));
     for (const mem of finalActive) {
       if (Array.isArray(mem._raw_entity_names)) {
         resolveEntityNames(mem, mem._raw_entity_names, messageIndex, entityRegistry);
@@ -596,6 +636,7 @@ function formatSessionMemories(memories) {
 export async function injectSessionMemories(updateTelemetry = false) {
   const settings = extension_settings[MODULE_NAME];
   if (!settings.session_enabled) {
+    setMacroContent(MACRO_NAMES.session, '');
     setExtensionPrompt(PROMPT_KEY_SESSION, '', extension_prompt_types.NONE, 0);
     invalidateUnifiedCache(PROMPT_KEY_SESSION);
     return;
@@ -605,6 +646,7 @@ export async function injectSessionMemories(updateTelemetry = false) {
   // storage for history but must not appear in the prompt.
   const memories = loadSessionMemories().filter((m) => !m.superseded_by);
   if (memories.length === 0) {
+    setMacroContent(MACRO_NAMES.session, '');
     setExtensionPrompt(PROMPT_KEY_SESSION, '', extension_prompt_types.NONE, 0);
     invalidateUnifiedCache(PROMPT_KEY_SESSION);
     return;
@@ -613,6 +655,7 @@ export async function injectSessionMemories(updateTelemetry = false) {
   // Trim to token budget using hybrid scoring on real AI turns, plain utility
   // scoring on chat load (no "current turn" to extract entity mentions from).
   const budget = settings.session_inject_budget ?? 400;
+  const fullTokens = estimateTokens(formatSessionMemories(memories));
   const protectedSet = new Set(selectProtectedMemories(memories, ['development', 'scene']));
 
   let trimmed;
@@ -661,6 +704,14 @@ export async function injectSessionMemories(updateTelemetry = false) {
   const sessionBlock = template.replace('{{session}}', formatSessionMemories(trimmed));
   const sceneStateBlock = buildCurrentSceneStateBlock(trimmed);
   const content = sceneStateBlock ? `${sceneStateBlock}\n${sessionBlock}` : sessionBlock;
+  reportTierTrimStats(PROMPT_KEY_SESSION, estimateTokens(content), fullTokens);
+
+  setMacroContent(MACRO_NAMES.session, content);
+  if (isMacroActive(MACRO_NAMES.session)) {
+    setExtensionPrompt(PROMPT_KEY_SESSION, '', extension_prompt_types.NONE, 0);
+    invalidateUnifiedCache(PROMPT_KEY_SESSION);
+    return;
+  }
 
   setExtensionPrompt(
     PROMPT_KEY_SESSION,
