@@ -365,6 +365,32 @@ function applyTotalBudget(total, s) {
 }
 
 /**
+ * Re-injects all memory tiers using the current budget settings and refreshes
+ * the token bar. Called after any budget slider change so the trim indicators
+ * clear immediately without waiting for the next message.
+ *
+ * Most inject functions are synchronous reads from stored data - no model calls.
+ * injectMemories may use embeddings for scoring but falls back to sync scoring,
+ * so the token bar updates promptly in all cases.
+ *
+ * @param {string|null} characterName - Active character (or group selection).
+ */
+function reinjectAfterBudgetChange(characterName) {
+  loadAndInjectSummary();
+  injectMemories(characterName);
+  injectRelationshipHistory(characterName);
+  injectSessionMemories();
+  injectSceneHistory();
+  injectArcs();
+  injectCanon(characterName);
+  injectProfiles(characterName);
+  injectEpistemicKnowledge(characterName, characterName);
+  injectStateLedger();
+  maybeInjectUnified();
+  updateTokenDisplay();
+}
+
+/**
  * Shows or hides advanced-only controls based on the current settings mode.
  * Also syncs the simplified budget slider value from the current per-tier totals.
  * @param {'simple'|'advanced'} mode
@@ -607,6 +633,7 @@ export function bindSettingsUI(ctrl) {
       $('#sm_total_budget_value').text(total);
       applyTotalBudget(total, extension_settings[MODULE_NAME]);
       saveSettingsDebounced();
+      reinjectAfterBudgetChange(ctrl.getSelectedCharacterName());
     });
 
   // Apply initial mode on load.
@@ -1052,6 +1079,7 @@ export function bindSettingsUI(ctrl) {
       extension_settings[MODULE_NAME].canon_inject_budget = val;
       $('#sm_canon_inject_budget_value').text(val);
       saveSettingsDebounced();
+      reinjectAfterBudgetChange(ctrl.getSelectedCharacterName());
     });
   $('#sm_canon_inject_budget_value').text(s.canon_inject_budget);
 
@@ -1291,6 +1319,7 @@ export function bindSettingsUI(ctrl) {
       extension_settings[MODULE_NAME].longterm_inject_budget = v;
       $('#sm_longterm_inject_budget_value').text(v);
       saveSettingsDebounced();
+      reinjectAfterBudgetChange(ctrl.getSelectedCharacterName());
     });
 
   // ---- Relationship history controls ------------------------------------
@@ -1311,6 +1340,7 @@ export function bindSettingsUI(ctrl) {
       extension_settings[MODULE_NAME].relationships_inject_budget = v;
       $('#sm_relationships_inject_budget_value').text(v);
       saveSettingsDebounced();
+      reinjectAfterBudgetChange(ctrl.getSelectedCharacterName());
     });
 
   $(`input[name="sm_relationships_position"][value="${s.relationships_position ?? 1}"]`).prop(
@@ -1456,6 +1486,7 @@ export function bindSettingsUI(ctrl) {
       extension_settings[MODULE_NAME].epistemic_inject_budget = v;
       $('#sm_epistemic_inject_budget_value').text(v);
       saveSettingsDebounced();
+      reinjectAfterBudgetChange(ctrl.getSelectedCharacterName());
     });
 
   $(`input[name="sm_epistemic_position"][value="${s.epistemic_position ?? 1}"]`).prop(
@@ -1512,6 +1543,7 @@ export function bindSettingsUI(ctrl) {
       extension_settings[MODULE_NAME].state_ledger_inject_budget = v;
       $('#sm_state_ledger_inject_budget_value').text(v);
       saveSettingsDebounced();
+      reinjectAfterBudgetChange(ctrl.getSelectedCharacterName());
     });
 
   $(`input[name="sm_state_ledger_position"][value="${s.state_ledger_position ?? 1}"]`).prop(
@@ -1772,6 +1804,7 @@ export function bindSettingsUI(ctrl) {
       extension_settings[MODULE_NAME].session_inject_budget = v;
       $('#sm_session_inject_budget_value').text(v);
       saveSettingsDebounced();
+      reinjectAfterBudgetChange(ctrl.getSelectedCharacterName());
     });
 
   $('#sm_extract_session_now').on('click', async function () {
@@ -1866,6 +1899,7 @@ export function bindSettingsUI(ctrl) {
       extension_settings[MODULE_NAME].scene_inject_budget = v;
       $('#sm_scene_inject_budget_value').text(v);
       saveSettingsDebounced();
+      reinjectAfterBudgetChange(ctrl.getSelectedCharacterName());
     });
 
   $('#sm_extract_scenes_now').on('click', async function () {
@@ -1960,6 +1994,7 @@ export function bindSettingsUI(ctrl) {
       extension_settings[MODULE_NAME].arcs_inject_budget = v;
       $('#sm_arcs_inject_budget_value').text(v);
       saveSettingsDebounced();
+      reinjectAfterBudgetChange(ctrl.getSelectedCharacterName());
     });
 
   $('#sm_extract_arcs_now').on('click', async function () {
@@ -2761,7 +2796,7 @@ export function bindSettingsUI(ctrl) {
       extension_settings[MODULE_NAME].profiles_inject_budget = val;
       $profilesBudgetVal.text(val + ' tokens');
       saveSettingsDebounced();
-      injectProfiles(ctrl.getSelectedCharacterName());
+      reinjectAfterBudgetChange(ctrl.getSelectedCharacterName());
     });
   $profilesBudgetVal.text((s.profiles_inject_budget ?? 400) + ' tokens');
 
