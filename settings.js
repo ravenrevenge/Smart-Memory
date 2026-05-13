@@ -919,13 +919,13 @@ export function bindSettingsUI(ctrl) {
         : 'Reference scenario for this tier.';
       $('#sm_model_test_tier_area').html(`
         <div class="sm_model_test_tier_name">${tier.name} <span class="sm_model_test_tier_pos">${current + 1} / ${tiers.length}</span></div>
-        <div class="sm_model_test_tier_hint">${tier.hint}</div>
-        <textarea class="sm_model_test_output text_pole" readonly>${tier.items.join('\n')}</textarea>
         <details class="sm_model_test_scenario">
           <summary>View test scenario</summary>
           <p class="sm_model_test_scenario_note">${charactersNote}. ${readWarning}</p>
           <textarea class="sm_model_test_output text_pole" readonly>${scenarioLines}</textarea>
         </details>
+        <div class="sm_model_test_tier_hint">${tier.hint}</div>
+        <textarea class="sm_model_test_output text_pole" readonly>${tier.items.join('\n')}</textarea>
         <div class="sm_model_test_nav">
           <button class="menu_button sm_model_test_prev"${current === 0 ? ' disabled' : ''}>&#8592; Previous</button>
           <button class="menu_button sm_model_test_next"${current === tiers.length - 1 ? ' disabled' : ''}>Next &#8594;</button>
