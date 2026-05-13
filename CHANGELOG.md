@@ -376,6 +376,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   chat, so it is visible to users who do not regularly open the settings panel
   without becoming intrusive.
 
+- **Auto-tune respects actual demand before cutting headroom**: when the sum
+  of all tier targets exceeds the total budget cap, auto-tune now cuts
+  headroom first rather than scaling every tier down proportionally. Tiers
+  that are actively trimming receive at least enough budget to fit their
+  current content; only the 15% headroom above that is reduced to stay
+  within the cap. If even the bare minimums exceed the cap, proportional
+  scaling applies as a last resort and the total budget slider remains the
+  correct control to use.
+
 - **Auto-tune budget allocation (experimental)**: an opt-in toggle in Developer
   settings automatically redistributes the per-tier token budget after each
   extraction pass based on observed demand. Tiers using less than their budget give

@@ -502,18 +502,35 @@ export function autoTuneBudgets(characterName) {
   const targets = TUNABLE_TIERS.map((tier) => {
     const stats = getTierTrimStats(tier.promptKey);
     if (!stats || stats.full === 0) {
-      return { tier, budget: s[tier.setting] };
+      return { tier, budget: s[tier.setting], minimum: AUTO_TUNE_FLOOR };
     }
-    return { tier, budget: snap(stats.full * AUTO_TUNE_HEADROOM) };
+    // Minimum is actual demand - headroom is a want, not a need.
+    return { tier, budget: snap(stats.full * AUTO_TUNE_HEADROOM), minimum: stats.full };
   });
 
   const totalTarget = targets.reduce((sum, t) => sum + t.budget, 0);
 
   if (totalTarget > totalCap) {
-    // Over the cap: scale all targets down proportionally, respecting the floor.
-    const scale = totalCap / totalTarget;
-    for (const t of targets) {
-      t.budget = snap(t.budget * scale);
+    // Over the cap: cut headroom first before cutting actual demand.
+    // Give each tier its minimum (actual demand), then distribute any
+    // remaining cap as extra headroom proportionally.
+    const totalMinimum = targets.reduce((sum, t) => sum + t.minimum, 0);
+    if (totalMinimum <= totalCap) {
+      // Enough room to cover all actual demand - prorate the surplus headroom.
+      const surplus = totalCap - totalMinimum;
+      const totalHeadroom = targets.reduce((sum, t) => sum + Math.max(0, t.budget - t.minimum), 0);
+      const headroomScale = totalHeadroom > 0 ? surplus / totalHeadroom : 0;
+      for (const t of targets) {
+        const headroom = Math.max(0, t.budget - t.minimum);
+        t.budget = snap(t.minimum + headroom * headroomScale);
+      }
+    } else {
+      // Even bare minimums exceed the cap - scale everything down proportionally.
+      // The total budget slider is the user's safety valve here.
+      const scale = totalCap / totalMinimum;
+      for (const t of targets) {
+        t.budget = snap(t.minimum * scale);
+      }
     }
   }
   // Under the cap: targets already sum to less than totalCap - no surplus
