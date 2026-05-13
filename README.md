@@ -80,6 +80,8 @@ Already have chats that predate Smart Memory? The [Manual Operations](#manual-op
 
 A small bar in the settings panel shows how many tokens each memory tier is currently using in the AI's context. It updates after every response so you can see at a glance whether Smart Memory is taking up a sensible amount of your context.
 
+When a tier is actively trimming content to fit its budget, its segment on the bar shows a red strip along the bottom edge. Hovering over the segment shows how many tokens were dropped. This is your signal to consider raising that tier's injection budget in the settings - or lowering another tier's budget to free up room.
+
 ### Long-term Memory - Persistent Facts
 
 Facts, relationship history, preferences, and significant events are extracted from your chats and saved for each character. These memories survive across all sessions - when you open a new chat with a character, everything they have learned is already there waiting.
