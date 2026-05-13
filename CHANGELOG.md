@@ -7,148 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.7.0] - 2026-05-13
 
-### Fixed
-
-- **Thinking model tokens polluting extraction output**: models that emit
-  `<think>...</think>` reasoning blocks (Qwen3, DeepSeek R1, and others with
-  thinking enabled) had their reasoning content passed directly to the extraction
-  parsers, flooding memory tiers with raw chain-of-thought rather than extracted
-  content. All model responses are now stripped of thinking blocks before parsing.
-  Non-thinking models are unaffected.
-
-- **Thinking models producing empty summaries and recaps**: the same reasoning
-  block issue affected summarization and recap generation - the thinking block
-  consumed the entire generation budget before any actual output was written,
-  resulting in an empty summary or no recap appearing on return to a chat.
-  Thinking block stripping and a generous generation budget now apply to all
-  memory operations, not just extraction.
-
-- **Contextual triggers dropped during consolidation**: triggers generated for
-  long-term memories were silently discarded whenever consolidation ran. The
-  consolidation pass creates new memory objects from LLM-parsed output, and
-  only `ts` and `entities` were carried forward from the pre-consolidation
-  version - `triggers` was not. On the next extraction pass the trigger loop
-  skipped those memories entirely, making recovery impossible. Triggers are
-  now preserved through consolidation. Memories that already lost their
-  triggers will recover them automatically on the next extraction pass.
-
-- **Relationship history buttons misaligned on short rows**: edit and delete
-  buttons drifted left when a pair had few descriptors, producing an uneven
-  layout across the list. The content area now stretches to fill available
-  width so the buttons are always flush to the right edge of the row.
-
-- **Duplicate descriptors after hedge normalization**: when the model output both
-  a hedged and unhedged form of the same descriptor in the same extraction pass
-  (e.g. `slightly nervous(medium)` and `nervous(medium)`), both survived into
-  storage after normalization. A post-normalization dedup pass now runs per pair
-  and keeps only the highest-magnitude entry for each root word.
-
-- **`crypto.randomUUID` unavailable on HTTP**: memory ID generation failed with
-  `TypeError: crypto.randomUUID is not a function` when SillyTavern was accessed
-  over plain HTTP from a remote device. A manual UUID v4 fallback is now used
-  when `crypto.randomUUID` is not available.
-
-- **Relationship history magnitude parsing**: the extraction parser only
-  recognized a `magnitude=X` keyword syntax but the model outputs plain
-  magnitude words (`low`, `medium`, `high`) inline with the descriptor; a
-  bare-word fallback now detects magnitude terms directly so they are no longer
-  treated as part of the descriptor word.
-
-- **Relationship history scoping**: pairs whose neither party matched the
-  current character were incorrectly stored in that character's record. The
-  filter now uses bidirectional substring matching so name variants (e.g.
-  `Asher` vs `Asher Somel`) still pass the check, and unrelated pairs from
-  other participants are discarded.
-
-- **Transitional phrases in relationship descriptors**: phrases like `then more
-  trusting` or `becoming warmer` were stored as literal descriptor words. A
-  transition-phrase regex now strips these before storage so only the root
-  sentiment word is kept.
-
-- **Relationship history panel not shown on chat load**: the panel was only
-  refreshed after an extraction pass, so switching to a chat with existing
-  relationship data showed an empty panel until the next extraction. The panel
-  now refreshes on every chat-change event and after each extraction pass.
-
-- **Token budget bar not updating after manual pair deletion**: deleting a
-  relationship pair from the settings panel did not recalculate the token
-  display. The token bar is now updated immediately after a manual deletion.
-
-- **`undefined(undefined)` descriptor entries from old-format data**: entries
-  written before the per-descriptor magnitude format were not normalized before
-  the union merge, producing `undefined(undefined)` entries in the stored state.
-  `loadRelationshipHistory` now converts the old string-array format to the
-  per-descriptor object format on read so both old and new data are handled
-  transparently without a schema migration step.
-
-- **Descriptor type pollution in relationship history**: physical states,
-  character traits, and scene atmosphere were bleeding into relationship
-  descriptor lists. The extraction prompt now explicitly restricts descriptors
-  to how the subject feels toward the target, with a `target leaves the room`
-  test included as a quick check: if the descriptor still applies after the
-  target is gone (e.g. `tired`, `wet`, `nervous`) it is not a relationship
-  descriptor and must be omitted.
-
-- **Unbounded descriptor accumulation**: relationship pairs had no upper limit,
-  allowing a slow expansion of low-signal hedged variants (`slightly-p`,
-  `slightly-exc` and similar truncation artifacts) over many extraction passes.
-  A hard cap of 6 descriptors per pair is now enforced; when the cap is
-  exceeded the lowest-magnitude descriptor is dropped to make room.
-
-- **Multi-word activation triggers now match correctly**: triggers generated by
-  the LLM were stored as phrases (e.g. `camp exposure`) but the relevance scorer
-  checked each word individually, so a two-word trigger never fired. Trigger
-  parsing now splits each phrase into individual words before storing, ensuring
-  every trigger token can match independently against the recent message text.
-
-- **Arc extraction noise on small local models**: two filters now work in
-  combination to reduce false positives from 8B models that misfile
-  established facts and scene details as story arcs. A keyword filter in the
-  parser requires every new arc candidate to contain at least one signal of a
-  genuine open thread - goal or obligation language (`must`, `needs to`,
-  `promised`), incompleteness markers (`unknown`, `unclear`, `remains open`),
-  unknown-actor framing (`someone`, `the identity of`), or open question
-  structure (`who is`, `whether`). A second semantic filter in the extraction
-  pass compares each candidate against current session memories; candidates
-  that score above the similarity threshold are treated as rephrased scene
-  details and dropped. The semantic filter falls back to keyword matching
-  when embeddings are not available. The model test fixture was also rewritten
-  with a scenario designed to have three explicitly open threads that do not
-  resolve within the conversation, giving a clearer pass/fail baseline for
-  the arc tier.
-
-- **AI scene break detection accuracy**: truncation limits in the detection
-  prompt were cutting off transition signals before the model could read them
-  (600/800 character limits). Limits raised to 1000/1200 characters and the
-  YES criteria softened to detect location changes that do not include explicit
-  landmark language. This resolves cases where catch-up found only 1-2 scenes
-  in a long roleplay that had many transitions.
-
-- **Heuristic scene break patterns expanded**: added sleep/fall-asleep patterns,
-  relaxed wake-up detection (no longer requires dawn markers), movement verbs
-  leading to a new location, and extended location-arrival patterns for multi-word
-  place names and possessives. The heuristic is now more likely to catch natural
-  RP transitions during catch-up when AI detection is off.
-
-- **Epistemic extraction on final scene buffer**: the catch-up handler previously
-  only ran epistemic extraction on detected scene breaks mid-history. The final
-  scene buffer (messages after the last detected break) was never processed.
-  Epistemic extraction now always runs on the final buffer before catch-up
-  completes.
-
-- **Relationship History missing from token usage bar after catch-up**: relationship
-  history was extracted per chunk during catch-up but never re-injected, so the
-  token bar showed no slice for it even when pairs were stored. It is now re-injected
-  after each chunk update and in the final reinject when catch-up completes.
-
-- **State Ledger preserved on Forget This Chat**: state cards are no longer
-  cleared by **Forget This Chat**. State cards accumulate knowledge from
-  long-term memories across multiple sessions; clearing them on a chat reset
-  would permanently discard facts that cannot be reconstructed from the current
-  chat alone. The button tooltip and confirmation text now correctly list all
-  data that survives: long-term memories, relationship history, state cards,
-  canon, and pinned arcs.
-
 ### Added
 
 - **Macro injection**: all 9 Smart Memory macros can be placed anywhere in a
@@ -376,15 +234,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   chat, so it is visible to users who do not regularly open the settings panel
   without becoming intrusive.
 
-- **Auto-tune respects actual demand before cutting headroom**: when the sum
-  of all tier targets exceeds the total budget cap, auto-tune now cuts
-  headroom first rather than scaling every tier down proportionally. Tiers
-  that are actively trimming receive at least enough budget to fit their
-  current content; only the 15% headroom above that is reduced to stay
-  within the cap. If even the bare minimums exceed the cap, proportional
-  scaling applies as a last resort and the total budget slider remains the
-  correct control to use.
-
 - **Auto-tune budget allocation (experimental)**: an opt-in toggle in Developer
   settings automatically redistributes the per-tier token budget after each
   extraction pass based on observed demand. Tiers using less than their budget give
@@ -407,6 +256,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   colors for memory nodes so the graph and the settings panel stay in sync.
   Because all hues share the same lightness and chroma they read as a cohesive
   family rather than a collection of unrelated colors.
+
+### Fixed
+
+- **`crypto.randomUUID` unavailable on HTTP**: memory ID generation failed with
+  `TypeError: crypto.randomUUID is not a function` when SillyTavern was accessed
+  over plain HTTP from a remote device. A manual UUID v4 fallback is now used
+  when `crypto.randomUUID` is not available.
+
+- **Arc extraction noise on small local models**: two filters now work in
+  combination to reduce false positives from 8B models that misfile
+  established facts and scene details as story arcs. A keyword filter in the
+  parser requires every new arc candidate to contain at least one signal of a
+  genuine open thread - goal or obligation language (`must`, `needs to`,
+  `promised`), incompleteness markers (`unknown`, `unclear`, `remains open`),
+  unknown-actor framing (`someone`, `the identity of`), or open question
+  structure (`who is`, `whether`). A second semantic filter in the extraction
+  pass compares each candidate against current session memories; candidates
+  that score above the similarity threshold are treated as rephrased scene
+  details and dropped. The semantic filter falls back to keyword matching
+  when embeddings are not available. The model test fixture was also rewritten
+  with a scenario designed to have three explicitly open threads that do not
+  resolve within the conversation, giving a clearer pass/fail baseline for
+  the arc tier.
+
+- **AI scene break detection accuracy**: truncation limits in the detection
+  prompt were cutting off transition signals before the model could read them
+  (600/800 character limits). Limits raised to 1000/1200 characters and the
+  YES criteria softened to detect location changes that do not include explicit
+  landmark language. This resolves cases where catch-up found only 1-2 scenes
+  in a long roleplay that had many transitions.
+
+- **Heuristic scene break patterns expanded**: added sleep/fall-asleep patterns,
+  relaxed wake-up detection (no longer requires dawn markers), movement verbs
+  leading to a new location, and extended location-arrival patterns for multi-word
+  place names and possessives. The heuristic is now more likely to catch natural
+  RP transitions during catch-up when AI detection is off.
 
 ## [1.6.11] - 2026-05-10
 
