@@ -1789,7 +1789,7 @@ export function updateEpistemicUI(characterName) {
   // whether any believes/hiding entries were extracted.
   const $details = $('<details class="sm_epistemic_spoiler">');
   const $summary = $(
-    '<summary class="sm_epistemic_spoiler_summary">Spoiler - false beliefs and hidden secrets</summary>',
+    '<summary class="sm_epistemic_spoiler_summary"><i class="fa-solid fa-lock"></i> Spoiler - false beliefs and hidden secrets <em>(click to reveal)</em></summary>',
   );
 
   // Intercept the open action to warn before revealing spoiler content.

@@ -1840,7 +1840,7 @@ body.sm-read-only .mes_edit_delete {
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  opacity: 0.6;
+  color: rgba(210, 160, 60, 0.75);
   user-select: none;
   list-style: none;
   padding: 4px 0;
@@ -1850,6 +1850,14 @@ body.sm-read-only .mes_edit_delete {
   display: none;
 }
 
+#smart_memory_settings .sm_epistemic_spoiler_summary em {
+  font-style: italic;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
+  opacity: 0.8;
+}
+
 #smart_memory_settings .sm_epistemic_spoiler[open] .sm_epistemic_spoiler_summary {
-  opacity: 0.85;
+  color: rgba(210, 160, 60, 0.95);
 }
