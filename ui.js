@@ -1716,6 +1716,8 @@ const EPISTEMIC_TYPE_LABELS = {
 /**
  * Re-renders the Perspectives & Secrets entry list for a character.
  * Each entry gets an edit and delete button. An add form is appended after the list.
+ * believes and hiding entries are grouped behind a spoiler to avoid unintentional
+ * player-side reveals in collaborative RP.
  *
  * @param {string|null} characterName - Card character name (storage key).
  */
@@ -1730,7 +1732,16 @@ export function updateEpistemicUI(characterName) {
     return;
   }
 
-  for (const entry of entries) {
+  const spoilerTypes = new Set(['believes', 'hiding']);
+  const open = entries.filter((e) => !spoilerTypes.has(e.type));
+  const secret = entries.filter((e) => spoilerTypes.has(e.type));
+
+  /**
+   * Builds and appends a single entry row to a target container.
+   * @param {Object} entry
+   * @param {jQuery} $target
+   */
+  function appendEntryRow(entry, $target) {
     const typeLabel = EPISTEMIC_TYPE_LABELS[entry.type] ?? entry.type;
     const displayText =
       entry.type === 'hiding'
@@ -1769,6 +1780,18 @@ export function updateEpistemicUI(characterName) {
       });
 
     $row.append($content, $editBtn, $deleteBtn);
-    $list.append($row);
+    $target.append($row);
+  }
+
+  for (const entry of open) appendEntryRow(entry, $list);
+
+  if (secret.length > 0) {
+    const $details = $('<details class="sm_epistemic_spoiler">');
+    const $summary = $(
+      '<summary class="sm_epistemic_spoiler_summary">Spoiler - false beliefs and hidden secrets</summary>',
+    );
+    $details.append($summary);
+    for (const entry of secret) appendEntryRow(entry, $details);
+    $list.append($details);
   }
 }
