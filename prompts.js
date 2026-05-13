@@ -729,6 +729,7 @@ Output only the three labelled paragraphs. No preamble, no disclaimers.`
  */
 export function buildTriggerGenerationPrompt(content) {
   return (
+    NO_ACTION_PREAMBLE +
     `[KEYWORD TASK - Output a comma-separated list only. Do NOT continue any story or explain your choices.]\n\n` +
     `Memory: "${content}"\n\n` +
     `List 4 to 6 keywords that would signal this memory is relevant to a conversation. Think broadly:\n` +
@@ -828,6 +829,7 @@ export function buildEpistemicExtractionPrompt(sceneText, participants) {
       : '';
 
   return (
+    NO_ACTION_PREAMBLE +
     `[EPISTEMIC EXTRACTION TASK - Output structured data only. Do NOT continue the roleplay.]\n\n` +
     `You are building a knowledge map: for each named character, what do they know,\n` +
     `what do they falsely believe, what do they suspect, and what are they concealing?\n\n` +
@@ -911,6 +913,7 @@ export function buildStateCardPrompt(excerpt, entityList) {
   const entityLines = entityList.map((e) => `- ${e.name} (${e.type})`).join('\n');
 
   return (
+    NO_ACTION_PREAMBLE +
     `[STATE EXTRACTION TASK - Do NOT continue the roleplay. Output structured data only.]\n\n` +
     `You are tracking the current physical and operational state of known entities in a story.\n\n` +
     `Known entities:\n${entityLines}\n\n` +

@@ -61,7 +61,7 @@
               Forget This Chat
               <span
                 class="sm-info"
-                data-tooltip="Clears all Smart Memory context specific to this chat. Long-term memories, relationship history, state cards, canon, and pinned arcs are not affected."
+                data-tooltip="Clears all Smart Memory context specific to this chat. Perspectives &amp; Secrets entries are also cleared. Long-term memories, relationship history, state cards, canon, and pinned arcs are not affected."
                 >ⓘ</span
               >
             </span>
@@ -258,7 +258,7 @@
                 >Triggered memories: In-chat depth
                 <span
                   class="sm-info"
-                  data-tooltip="Memories whose keyword triggers match the current turn are injected a second time at this in-chat depth, closer to the prompt. Set to 0 to disable the secondary slot."
+                  data-tooltip="Memories whose keyword triggers match the current turn are injected a second time at this in-chat depth, closer to the prompt. Lower values place the block nearer to the current message."
                   >ⓘ</span
                 ></span
               >
@@ -1586,7 +1586,7 @@
             </label>
             <div style="display: flex; gap: 6px; align-items: center">
               <select id="sm_ollama_model" class="text_pole" style="flex: 1">
-                <option value="">— click refresh to load models —</option>
+                <option value="">- click refresh to load models -</option>
               </select>
               <input
                 id="sm_ollama_model_manual"
@@ -1846,7 +1846,7 @@
                 style="display: flex; gap: 6px; align-items: center"
               >
                 <select id="sm_embedding_model" class="text_pole" style="flex: 1">
-                  <option value="">— click refresh to load models —</option>
+                  <option value="">- click refresh to load models -</option>
                 </select>
                 <input
                   id="sm_embedding_model_manual"

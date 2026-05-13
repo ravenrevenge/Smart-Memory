@@ -177,10 +177,16 @@ export async function deleteStateCard(name, type) {
 export async function migrateStateLedgerKey(name, oldType, newType) {
   const ledger = loadStateLedger();
   const oldKey = ledgerKey(name, oldType);
-  const newKey = ledgerKey(name, newType);
   if (!(oldKey in ledger)) return;
-  ledger[newKey] = ledger[oldKey];
-  delete ledger[oldKey];
+  // If the new type is not a state-card type (e.g. 'concept', 'unknown'),
+  // discard the card rather than storing it under an unreachable key.
+  if (!STATE_CARD_TYPES.has(newType)) {
+    delete ledger[oldKey];
+  } else {
+    const newKey = ledgerKey(name, newType);
+    ledger[newKey] = ledger[oldKey];
+    delete ledger[oldKey];
+  }
   await saveStateLedger(ledger);
 }
 

@@ -2430,7 +2430,7 @@ export function bindSettingsUI(ctrl) {
     if (isCatchUpRunning()) return;
     if (
       !(await callGenericPopup(
-        'Clear all Smart Memory context for this chat?\n\nLong-term memories, relationship history, state cards, canon, and pinned arcs are not affected.',
+        'Clear all Smart Memory context for this chat?\n\nPerspectives & Secrets entries are also cleared.\nLong-term memories, relationship history, state cards, canon, and pinned arcs are not affected.',
         POPUP_TYPE.CONFIRM,
       ))
     )

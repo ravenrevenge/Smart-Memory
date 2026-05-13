@@ -160,7 +160,7 @@ import {
   initTypePickers,
 } from './ui.js';
 import { defaultSettings, loadSettings, bindSettingsUI } from './settings.js';
-import { clearTierTrimStats, resetTrimToastFlag } from './trim-stats.js';
+import { clearTierTrimStats, resetTrimToastFlag, markChatLoadComplete } from './trim-stats.js';
 
 // ---- Module-level state -------------------------------------------------
 
@@ -1002,6 +1002,9 @@ async function onChatChangedImpl() {
 
     maybeInjectUnified();
     updateTokenDisplay();
+    // Mark load complete so the trim toast can fire on the next injection cycle,
+    // not immediately on load before the user has done anything.
+    markChatLoadComplete();
 
     const groupChatMeta = getContext().chatMetadata;
     if (settings.recap_enabled) {

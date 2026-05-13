@@ -24,13 +24,15 @@
  * The token bar reads these stats to show a visual indicator when a tier is
  * actively dropping content to stay within budget.
  *
- * reportTierTrimStats  - records injected vs full token counts for a tier
- * getTierTrimStats     - returns the stored stats for a tier key
- * clearTierTrimStats   - resets all stats (call on chat change)
- * hasAnyTrimmedTier    - returns true when at least one tier is over budget
- * markTrimToastFired   - records that the one-time trim toast has been shown
- * hasTrimToastFired    - returns true if the toast has already been shown
- * resetTrimToastFlag   - clears the flag (call on chat change)
+ * reportTierTrimStats    - records injected vs full token counts for a tier
+ * getTierTrimStats       - returns the stored stats for a tier key
+ * clearTierTrimStats     - resets all stats (call on chat change)
+ * hasAnyTrimmedTier      - returns true when at least one non-exempt tier is over budget
+ * markTrimToastFired     - records that the one-time trim toast has been shown
+ * hasTrimToastFired      - returns true if the toast has already been shown
+ * resetTrimToastFlag     - clears toast + load-complete flags (call on chat change)
+ * markChatLoadComplete   - signals that the initial chat load injection pass is done
+ * isChatLoadComplete     - returns true once the load pass has finished
  */
 
 /** @type {Object.<string, {injected: number, full: number}>} */
@@ -38,6 +40,14 @@ const _stats = {};
 
 /** Prevents the one-time "content trimmed" toast from re-firing mid-chat. */
 let _trimToastFired = false;
+
+/**
+ * Set to true after the initial chat load injection pass completes.
+ * The trim toast is gated on this so it does not fire immediately on chat load
+ * before the user has done anything - it fires only after the first post-load
+ * injection cycle.
+ */
+let _chatLoadComplete = false;
 
 /**
  * Records the injected and full (pre-trim) token counts for a tier.
@@ -94,7 +104,28 @@ export function hasTrimToastFired() {
   return _trimToastFired;
 }
 
-/** Resets the trim toast flag. Call on chat change alongside clearTierTrimStats. */
+/**
+ * Resets the trim toast and chat-load-complete flags.
+ * Call on chat change alongside clearTierTrimStats.
+ */
 export function resetTrimToastFlag() {
   _trimToastFired = false;
+  _chatLoadComplete = false;
+}
+
+/**
+ * Signals that the initial injection pass after chat load has finished.
+ * Call once at the end of onChatChangedImpl, after the first updateTokenDisplay.
+ * The trim toast will not fire until this has been called.
+ */
+export function markChatLoadComplete() {
+  _chatLoadComplete = true;
+}
+
+/**
+ * Returns true once the initial chat load injection pass has completed.
+ * @returns {boolean}
+ */
+export function isChatLoadComplete() {
+  return _chatLoadComplete;
 }

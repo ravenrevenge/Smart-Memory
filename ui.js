@@ -109,6 +109,7 @@ import {
   hasAnyTrimmedTier,
   hasTrimToastFired,
   markTrimToastFired,
+  isChatLoadComplete,
 } from './trim-stats.js';
 import {
   loadEpistemicKnowledge,
@@ -122,6 +123,7 @@ import {
   deleteStateCard,
   migrateStateLedgerKey,
   isStateLedgerEnabled,
+  injectStateLedger,
   STATE_CARD_FIELDS,
   STATE_CARD_TYPES,
 } from './state-ledger.js';
@@ -300,7 +302,7 @@ export function updateTokenDisplay() {
   // Fire a one-time notification the first time any tier is found to be trimming
   // content. Users who never open the settings panel will still see this once,
   // prompting them to check the token bar. Subsequent calls are silent.
-  if (hasAnyTrimmedTier() && !hasTrimToastFired()) {
+  if (isChatLoadComplete() && hasAnyTrimmedTier() && !hasTrimToastFired()) {
     markTrimToastFired();
     toastr.warning(
       'One or more memory tiers are trimming content to stay within budget. Check the token bar in Smart Memory settings.',
@@ -1443,7 +1445,9 @@ export function updateEntityPanel(characterName) {
           if (v) newFields[f] = v;
         }
         await setStateCard(entity.name, entity.type, newFields);
+        injectStateLedger();
         updateEntityPanel(characterName);
+        updateTokenDisplay();
       });
 
       $cancelBtn.on('click', (e) => {
@@ -1454,7 +1458,9 @@ export function updateEntityPanel(characterName) {
       $clearBtn.on('click', async (e) => {
         e.stopPropagation();
         await deleteStateCard(entity.name, entity.type);
+        injectStateLedger();
         updateEntityPanel(characterName);
+        updateTokenDisplay();
       });
 
       $panel.append($section);
