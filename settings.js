@@ -2429,7 +2429,7 @@ export function bindSettingsUI(ctrl) {
     const nameLabel = characterName ? `"${characterName}"` : 'this character';
     if (
       !(await callGenericPopup(
-        `Fresh Start - this will permanently delete all long-term memories for ${nameLabel} and clear all Smart Memory context for this chat.\n\nThis cannot be undone. Continue?`,
+        `Fresh Start for ${nameLabel} - this will permanently delete all Smart Memory data for this character and chat.\n\nThis cannot be undone. Continue?`,
         POPUP_TYPE.CONFIRM,
       ))
     )
