@@ -2375,7 +2375,7 @@ export function bindSettingsUI(ctrl) {
     if (isCatchUpRunning()) return;
     if (
       !(await callGenericPopup(
-        'Clear all Smart Memory context for this chat?\n\nThis will erase the summary, session memories, scene history, and story arcs. Long-term memories are not affected.',
+        'Clear all Smart Memory context specific to this chat?\n\nLong-term memories, canon, and pinned arcs are not affected.',
         POPUP_TYPE.CONFIRM,
       ))
     )
