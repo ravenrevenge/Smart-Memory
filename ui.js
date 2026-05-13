@@ -104,7 +104,12 @@ import {
 } from './graph-migration.js';
 import { getUnifiedTierBreakdown } from './unified-inject.js';
 import { hasEmbeddingFailed } from './embeddings.js';
-import { getTierTrimStats } from './trim-stats.js';
+import {
+  getTierTrimStats,
+  hasAnyTrimmedTier,
+  hasTrimToastFired,
+  markTrimToastFired,
+} from './trim-stats.js';
 import {
   loadEpistemicKnowledge,
   saveEpistemicKnowledge,
@@ -291,6 +296,18 @@ export function updateTokenDisplay() {
   if (usedEl) usedEl.textContent = `~${total.toLocaleString()}`;
   if (maxEl) maxEl.textContent = maxContext ? maxContext.toLocaleString() : '?';
   if (pctEl) pctEl.textContent = contextPct;
+
+  // Fire a one-time notification the first time any tier is found to be trimming
+  // content. Users who never open the settings panel will still see this once,
+  // prompting them to check the token bar. Subsequent calls are silent.
+  if (hasAnyTrimmedTier() && !hasTrimToastFired()) {
+    markTrimToastFired();
+    toastr.info(
+      'One or more memory tiers are trimming content to stay within budget. Check the token bar in Smart Memory settings.',
+      'Smart Memory',
+      { timeOut: 8000, extendedTimeOut: 4000, closeButton: true },
+    );
+  }
 
   // ---- Per-character rows (group chats only) ------------------------------
 

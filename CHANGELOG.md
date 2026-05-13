@@ -359,6 +359,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   again. The override is stored per-chat in `chatMetadata` and does not change
   the settings slider.
 
+- **Trim indicator on the token usage bar**: each segment of the token usage bar
+  now shows a red underline when that tier is actively trimming content to fit its
+  budget. The hover tooltip extends to show how many tokens were dropped alongside
+  the injected count. The indicator resets on every chat switch so it only reflects
+  the current state.
+
+- **One-time trim notification**: the first time any memory tier trims content in
+  a chat, a toast notification appears directing the user to the token bar in
+  settings. The notification fires at most once per chat and never repeats for that
+  chat, so it is visible to users who do not regularly open the settings panel
+  without becoming intrusive.
+
 ## [1.6.11] - 2026-05-10
 
 ### Added

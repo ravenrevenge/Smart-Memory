@@ -24,13 +24,20 @@
  * The token bar reads these stats to show a visual indicator when a tier is
  * actively dropping content to stay within budget.
  *
- * reportTierTrimStats - records injected vs full token counts for a tier
- * getTierTrimStats    - returns the stored stats for a tier key
- * clearTierTrimStats  - resets all stats (call on chat change)
+ * reportTierTrimStats  - records injected vs full token counts for a tier
+ * getTierTrimStats     - returns the stored stats for a tier key
+ * clearTierTrimStats   - resets all stats (call on chat change)
+ * hasAnyTrimmedTier    - returns true when at least one tier is over budget
+ * markTrimToastFired   - records that the one-time trim toast has been shown
+ * hasTrimToastFired    - returns true if the toast has already been shown
+ * resetTrimToastFlag   - clears the flag (call on chat change)
  */
 
 /** @type {Object.<string, {injected: number, full: number}>} */
 const _stats = {};
+
+/** Prevents the one-time "content trimmed" toast from re-firing mid-chat. */
+let _trimToastFired = false;
 
 /**
  * Records the injected and full (pre-trim) token counts for a tier.
@@ -60,4 +67,27 @@ export function getTierTrimStats(key) {
  */
 export function clearTierTrimStats() {
   for (const k of Object.keys(_stats)) delete _stats[k];
+}
+
+/**
+ * Returns true if at least one tier has reported trimmed content this chat.
+ * @returns {boolean}
+ */
+export function hasAnyTrimmedTier() {
+  return Object.values(_stats).some((s) => s.full > s.injected);
+}
+
+/** Records that the one-time trim notification has been shown for this chat. */
+export function markTrimToastFired() {
+  _trimToastFired = true;
+}
+
+/** Returns true if the trim toast has already fired for this chat. */
+export function hasTrimToastFired() {
+  return _trimToastFired;
+}
+
+/** Resets the trim toast flag. Call on chat change alongside clearTierTrimStats. */
+export function resetTrimToastFlag() {
+  _trimToastFired = false;
 }

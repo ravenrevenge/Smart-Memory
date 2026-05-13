@@ -160,7 +160,7 @@ import {
   initTypePickers,
 } from './ui.js';
 import { defaultSettings, loadSettings, bindSettingsUI } from './settings.js';
-import { clearTierTrimStats } from './trim-stats.js';
+import { clearTierTrimStats, resetTrimToastFlag } from './trim-stats.js';
 
 // ---- Module-level state -------------------------------------------------
 
@@ -928,6 +928,7 @@ async function onChatChangedImpl() {
   // Reset per-load flags so warnings and trim indicators start fresh for the new chat.
   resetEpistemicWarnFlag();
   clearTierTrimStats();
+  resetTrimToastFlag();
 
   // Dismiss any recap overlay from the previous chat immediately - it is modal
   // and blocks input, so leaving it up over the new chat is confusing.
