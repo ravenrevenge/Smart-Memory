@@ -242,24 +242,24 @@ If nothing new, output exactly: NONE`
  */
 export function buildSceneDetectPrompt(currentMessage, previousMessage) {
   const prevSection = previousMessage
-    ? `PREVIOUS MESSAGE (for context - the scene that just ended or is continuing):\n${previousMessage.slice(0, 600)}\n\n`
+    ? `PREVIOUS MESSAGE (for context - the scene that just ended or is continuing):\n${previousMessage.slice(0, 1000)}\n\n`
     : '';
 
   return `${prevSection}CURRENT MESSAGE:
-${currentMessage.slice(0, 800)}
+${currentMessage.slice(0, 1200)}
 
 ---
 Did the CURRENT MESSAGE mark the start of a new scene?
 
 A NEW SCENE starts when:
-- A meaningful amount of time has passed (hours, days, sleep, dawn breaking, waking up after rest)
-- The characters have moved to a clearly different location
-- A hard narrative break occurs (portal, transition, loss of consciousness then recovery, etc.)
+- Time has passed - sleep, waking up, dawn breaking, or any gap between the previous and current message
+- The characters have moved to a different location (a new room, building, outdoor area, or setting)
+- A hard narrative break occurs (transition, loss of consciousness then recovery, etc.)
 
 NOT a new scene:
 - Action, combat, or drama continuing in the same location and moment
 - Emotional beats or dialogue within the same continuous encounter
-- The story picking up seconds or minutes after the previous message
+- The story picking up seconds or minutes after the previous message with no location change
 
 Answer YES or NO only. Nothing else.`;
 }

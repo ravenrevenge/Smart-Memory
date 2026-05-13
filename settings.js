@@ -2232,12 +2232,17 @@ export function bindSettingsUI(ctrl) {
             return false;
           };
 
-          for (const msg of allMessages) {
+          for (let msgIdx = 0; msgIdx < allMessages.length; msgIdx++) {
             if (ctrl.catchUpCancelled) break;
+            const msg = allMessages[msgIdx];
             sceneBuffer.push(msg);
 
             const msgText = msg.mes ?? '';
             const isAiMsg = !msg.is_user;
+
+            if (isAiMsg && settings.scene_ai_detect) {
+              setStatusMessage(`Detecting scene breaks... (${msgIdx + 1}/${allMessages.length})`);
+            }
 
             // AI detection only runs on AI messages - user messages are skipped,
             // matching the behaviour of the normal CHARACTER_MESSAGE_RENDERED path.
