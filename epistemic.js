@@ -35,6 +35,7 @@
  * injectEpistemicKnowledge         - pushes the knowledge block into the prompt; warn=true prompts budget growth
  * loadAndInjectEpistemicKnowledge  - restores and re-injects on chat load
  * resetEpistemicWarnFlag           - resets the per-load overflow warning flag; call on chat change
+ * shrinkEpistemicBudgetIfPossible  - pulls the per-chat budget back down after entries are deleted
  */
 
 import {
@@ -103,6 +104,34 @@ function saveEpistemicBudgetOverride(newBudget) {
   context
     .saveMetadata()
     .catch((err) => console.error('[SmartMemory] Failed to save epistemic budget override:', err));
+}
+
+/**
+ * Shrinks the per-chat budget override after entries are deleted.
+ * If the current override exceeds what the remaining entries need by more than
+ * 100 tokens, the override is pulled back to needed + 100. Never goes below
+ * the base settings value so the slider still acts as a floor.
+ *
+ * Call this after any manual entry deletion so the budget reflects the list.
+ *
+ * @param {string} characterName
+ * @param {string} respondingCharName
+ */
+export function shrinkEpistemicBudgetIfPossible(characterName, respondingCharName) {
+  const settings = extension_settings[MODULE_NAME];
+  const context = getContext();
+  const override = context.chatMetadata?.[META_KEY]?.epistemicBudgetOverride;
+  if (typeof override !== 'number') return; // no override set, nothing to shrink
+
+  const entries = loadEpistemicKnowledge(characterName);
+  const block = buildEpistemicBlock(entries, respondingCharName, settings);
+  const needed = block ? estimateTokens(block) : 0;
+  const floor = settings.epistemic_inject_budget ?? 200;
+  const ideal = Math.max(floor, needed + 100);
+
+  if (ideal < override) {
+    saveEpistemicBudgetOverride(ideal);
+  }
 }
 
 // ---- Feature gate -----------------------------------------------------------

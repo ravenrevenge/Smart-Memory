@@ -108,6 +108,7 @@ import {
   loadEpistemicKnowledge,
   saveEpistemicKnowledge,
   injectEpistemicKnowledge,
+  shrinkEpistemicBudgetIfPossible,
 } from './epistemic.js';
 import {
   getStateCard,
@@ -1774,6 +1775,7 @@ export function updateEpistemicUI(characterName) {
           characterName,
           current.filter((e) => e.id !== entry.id),
         );
+        shrinkEpistemicBudgetIfPossible(characterName, characterName);
         injectEpistemicKnowledge(characterName, characterName);
         updateEpistemicUI(characterName);
         updateTokenDisplay();
