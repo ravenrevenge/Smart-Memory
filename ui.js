@@ -114,6 +114,7 @@ import {
   setStateCard,
   deleteStateCard,
   migrateStateLedgerKey,
+  isStateLedgerEnabled,
   STATE_CARD_FIELDS,
   STATE_CARD_TYPES,
 } from './state-ledger.js';
@@ -1333,8 +1334,8 @@ export function updateEntityPanel(characterName) {
 
     $panel.append($row);
 
-    // State card subsection - only for types that support state cards.
-    if (STATE_CARD_TYPES.has(entity.type)) {
+    // State card subsection - only when the ledger is enabled and the entity type supports state cards.
+    if (isStateLedgerEnabled() && STATE_CARD_TYPES.has(entity.type)) {
       const fields = STATE_CARD_FIELDS[entity.type] ?? [];
       const existingCard = getStateCard(entity.name, entity.type);
 
