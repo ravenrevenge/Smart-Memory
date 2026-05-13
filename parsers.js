@@ -659,6 +659,8 @@ const STATE_NOISE_VALUES = new Set([
   'none',
   'none mentioned',
   'not mentioned',
+  'not specified',
+  'not applicable',
   'n/a',
   'na',
   'unspecified',

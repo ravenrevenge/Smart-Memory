@@ -291,9 +291,15 @@ export function buildArcExtractionPrompt(chatHistory, existingArcs) {
 ${existingSection}CONVERSATION:\n${chatHistory}
 
 ---
-Extract open story threads from the conversation: unresolved conflicts, unfulfilled promises, active character goals, open mysteries, and tensions that have not yet played out.
+Extract the most significant open story threads from the conversation: unresolved conflicts, unfulfilled promises, active character goals, open mysteries, and tensions that have not yet played out. Aim for the 3-5 threads that matter most to the story - do not list every detail that has not resolved.
 
-An arc is something still in motion - a question not yet answered, a goal not yet reached, a conflict still active. Do NOT output facts about things that already happened and are over.
+An arc is something still in motion across the story - a question not yet answered, a goal not yet reached, a conflict still active. Do NOT output facts about things that already happened and are over.
+
+These are NOT arcs - do not output them:
+- Tactical details or logistical information ("the south gate is unguarded after midnight")
+- Single-scene contingencies that may or may not become relevant ("Fen might be useful")
+- Consequences or sub-threads of the same arc - group them into one entry
+- Facts about events that already occurred, even dramatic ones
 
 Output format - one entry per line, two tags allowed:
   [arc] <new unresolved thread from this conversation, not already listed above>
@@ -304,6 +310,7 @@ Examples:
   [arc] The identity of whoever burned the granary is still unknown.
   [resolved] The missing heir was found alive in the northern keep.
   NOT an arc: "Kira was captured by the guards." - this is a fact, not an open thread.
+  NOT an arc: "The back door is unlocked." - this is a tactical detail, not a story thread.
 
 Only output [arc] for threads that are NEW in this conversation - do not re-output existing arcs.
 Only mark [resolved] if the conversation directly closes the arc - a promise kept, a mystery answered, a conflict ended. A related revelation is NOT a resolution. If new information makes an existing arc more urgent or complicated, it stays open.
