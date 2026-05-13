@@ -65,7 +65,9 @@ import {
 } from './longterm.js';
 import {
   clearEpistemicKnowledge,
+  extractEpistemicKnowledge,
   injectEpistemicKnowledge,
+  isEpistemicEnabled,
   loadEpistemicKnowledge,
   saveEpistemicKnowledge,
 } from './epistemic.js';
@@ -96,7 +98,12 @@ import { checkContinuity, generateRepair, injectRepair } from './continuity.js';
 import { getHardwareProfile, getEmbeddingBatch, clearEmbeddingFailed } from './embeddings.js';
 import { clearCanon, generateCanon, injectCanon, saveCanon } from './canon.js';
 import { clearSessionEntityRegistry } from './graph-migration.js';
-import { clearStateLedger, injectStateLedger } from './state-ledger.js';
+import {
+  clearStateLedger,
+  injectStateLedger,
+  isStateLedgerEnabled,
+  runStateCardExtraction,
+} from './state-ledger.js';
 import { generateProfiles, injectProfiles, clearProfiles, loadProfiles } from './profiles.js';
 import { clearUnifiedSlot, injectUnified, maybeInjectUnified } from './unified-inject.js';
 import { showMemoryGraph } from './graph.js';
@@ -2169,6 +2176,12 @@ export function bindSettingsUI(ctrl) {
             console.error('[SmartMemory] Catch-up arc extraction error (chunk):', err);
           });
         }
+        if (isStateLedgerEnabled() && !isFreshStart()) {
+          setStatusMessage(`Catching up... (${i}/${total} messages - updating state ledger)`);
+          await runStateCardExtraction(characterName, chunk).catch((err) => {
+            console.error('[SmartMemory] Catch-up state ledger extraction error (chunk):', err);
+          });
+        }
 
         // Re-inject after each chunk so the token display reflects what is
         // actually stored, not just what was injected before catch-up started.
@@ -2196,11 +2209,12 @@ export function bindSettingsUI(ctrl) {
         // would cost one model call per message across potentially hundreds of
         // messages. The heuristic is free and good enough for bulk processing.
         if (settings.scene_enabled) {
-          setStatusMessage('Detecting and summarizing scenes...');
+          setStatusMessage('Detecting scene breaks...');
           const sceneHistory = loadSceneHistory();
           const max = settings.scene_max_history ?? 5;
           const minMessages = settings.scene_min_messages ?? 3;
           let sceneBuffer = [];
+          let sceneCount = 0;
 
           /**
            * Deduplicates a candidate summary against the last three stored scenes,
@@ -2223,6 +2237,8 @@ export function bindSettingsUI(ctrl) {
 
             const msgText = msg.mes ?? '';
             if (detectSceneBreakHeuristic(msgText) && sceneBuffer.length >= minMessages) {
+              sceneCount++;
+              setStatusMessage(`Summarizing scene ${sceneCount}...`);
               const sceneSummary = await summarizeScene(sceneBuffer).catch((err) => {
                 console.error('[SmartMemory] Catch-up scene summary failed:', err);
                 return null;
@@ -2234,6 +2250,14 @@ export function bindSettingsUI(ctrl) {
                   source_memory_ids: [],
                 });
                 if (sceneHistory.length > max) sceneHistory.splice(0, sceneHistory.length - max);
+              }
+              if (isEpistemicEnabled() && !isFreshStart()) {
+                setStatusMessage(
+                  `Summarizing scene ${sceneCount}... (extracting epistemic knowledge)`,
+                );
+                await extractEpistemicKnowledge(sceneBuffer, characterName).catch((err) => {
+                  console.error('[SmartMemory] Catch-up epistemic extraction error:', err);
+                });
               }
               sceneBuffer = [];
             }
@@ -2326,7 +2350,10 @@ export function bindSettingsUI(ctrl) {
       injectSessionMemories();
       injectSceneHistory();
       injectArcs();
+      injectStateLedger();
+      injectEpistemicKnowledge(characterName, characterName);
       injectProfiles(characterName);
+      updateEntityPanel(characterName);
       updateLongTermUI(characterName);
       updateRelationshipHistoryUI(characterName);
       updateEpistemicUI(characterName);
@@ -2334,7 +2361,6 @@ export function bindSettingsUI(ctrl) {
       updateScenesUI();
       updateArcsUI();
       updateProfilesUI(loadProfiles(characterName));
-      updateEntityPanel(characterName);
       maybeInjectUnified();
       updateTokenDisplay();
       saveSettingsDebounced();
