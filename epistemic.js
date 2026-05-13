@@ -32,8 +32,9 @@
  * saveEpistemicKnowledge           - persists entries for a character
  * clearEpistemicKnowledge          - removes all entries for a character
  * extractEpistemicKnowledge        - runs the extraction pass for the current scene
- * injectEpistemicKnowledge         - pushes the knowledge block into the prompt
+ * injectEpistemicKnowledge         - pushes the knowledge block into the prompt; warn=true prompts budget growth
  * loadAndInjectEpistemicKnowledge  - restores and re-injects on chat load
+ * resetEpistemicWarnFlag           - resets the per-load overflow warning flag; call on chat change
  */
 
 import {
@@ -45,6 +46,7 @@ import {
 import { getContext, extension_settings } from '../../../extensions.js';
 import {
   MODULE_NAME,
+  META_KEY,
   PROMPT_KEY_EPISTEMIC,
   estimateTokens,
   generateMemoryId,
@@ -57,6 +59,51 @@ import { getEmbeddingBatch, cosineSimilarity } from './embeddings.js';
 import { smLog } from './logging.js';
 import { invalidateUnifiedCache } from './unified-inject.js';
 import { MACRO_NAMES, setMacroContent, isMacroActive } from './macros.js';
+
+// ---- Per-chat budget override -----------------------------------------------
+
+// Prevents the overflow warning from firing repeatedly within the same
+// extraction batch or on passive re-injections. Reset on chat change via
+// resetEpistemicWarnFlag().
+let _epistemicWarnedThisLoad = false;
+
+/**
+ * Resets the overflow warning flag. Call on CHAT_CHANGED / CHAT_LOADED so
+ * the warning can fire again when the user enters a new chat.
+ */
+export function resetEpistemicWarnFlag() {
+  _epistemicWarnedThisLoad = false;
+}
+
+/**
+ * Returns the effective token budget for the current chat.
+ * A per-chat override stored in chatMetadata takes precedence over the
+ * settings slider value so the user does not need to adjust the slider
+ * for each individual roleplay.
+ *
+ * @param {Object} settings - extension_settings[MODULE_NAME]
+ * @returns {number}
+ */
+function getEffectiveEpistemicBudget(settings) {
+  const context = getContext();
+  const override = context.chatMetadata?.[META_KEY]?.epistemicBudgetOverride;
+  return typeof override === 'number' ? override : (settings.epistemic_inject_budget ?? 200);
+}
+
+/**
+ * Persists a new per-chat budget override to chatMetadata (fire-and-forget).
+ *
+ * @param {number} newBudget
+ */
+function saveEpistemicBudgetOverride(newBudget) {
+  const context = getContext();
+  if (!context.chatMetadata) context.chatMetadata = {};
+  if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
+  context.chatMetadata[META_KEY].epistemicBudgetOverride = newBudget;
+  context
+    .saveMetadata()
+    .catch((err) => console.error('[SmartMemory] Failed to save epistemic budget override:', err));
+}
 
 // ---- Feature gate -----------------------------------------------------------
 
@@ -323,14 +370,25 @@ function buildEpistemicBlock(entries, respondingChar, settings) {
  * Injects the perspective-scoped knowledge block for the responding character.
  * Clears the slot when the feature is disabled or no relevant entries exist.
  *
+ * When warn is true and the block exceeds the effective budget, the user is
+ * offered a chance to grow the per-chat budget. In normal roleplay the budget
+ * grows by 100 tokens per confirmation. When exactFit is also true (catch-up
+ * mode) the budget jumps directly to the size needed so the user is only asked
+ * once. The override is stored in chatMetadata and does not affect the settings
+ * slider.
+ *
  * @param {string} characterName - Card character name (storage key for entries).
  * @param {string} respondingCharName - The character currently responding.
  * @param {boolean} [updateTelemetry=false] - Whether to update the token usage bar.
+ * @param {boolean} [warn=false] - Whether to prompt the user when the budget is exceeded.
+ * @param {boolean} [exactFit=false] - When true, grow to exact needed size rather than +100.
  */
 export function injectEpistemicKnowledge(
   characterName,
   respondingCharName,
   updateTelemetry = false,
+  warn = false,
+  exactFit = false,
 ) {
   const settings = extension_settings[MODULE_NAME];
 
@@ -358,11 +416,30 @@ export function injectEpistemicKnowledge(
     return;
   }
 
-  // Apply token budget cap.
-  const budget = settings.epistemic_inject_budget ?? 200;
+  // Apply token budget cap, using the per-chat override when set.
+  let budget = getEffectiveEpistemicBudget(settings);
   let content = block;
+
   if (estimateTokens(content) > budget) {
-    // Trim to budget by dropping lines from the end until within budget.
+    if (warn && !_epistemicWarnedThisLoad) {
+      const needed = estimateTokens(content);
+      const increment = exactFit ? needed - budget : 100;
+      const newBudget = budget + increment;
+      const grew = confirm(
+        exactFit
+          ? `Your Perspectives & Secrets list needs ${needed} tokens but the current budget for this chat is ${budget}.\n\nIncrease the budget to ${newBudget} for this roleplay? This will consume more VRAM and prompt size.\n\nThis does not change your settings.`
+          : `Your Perspectives & Secrets list needs ${needed} tokens but the current budget for this chat is ${budget}.\n\nIncrease the budget by 100 tokens for this roleplay? This will consume more VRAM and prompt size.\n\nThis does not change your settings.`,
+      );
+      if (grew) {
+        budget = newBudget;
+        saveEpistemicBudgetOverride(budget);
+        // Leave _epistemicWarnedThisLoad false so the user can keep growing
+        // in +100 increments if the list still does not fit after this step.
+      } else {
+        _epistemicWarnedThisLoad = true;
+      }
+    }
+    // Trim to the (possibly just-grown) budget by dropping lines from the end.
     const blockLines = content.split('\n');
     while (blockLines.length > 1 && estimateTokens(blockLines.join('\n')) > budget) {
       blockLines.pop();

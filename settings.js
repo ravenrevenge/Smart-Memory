@@ -70,6 +70,7 @@ import {
   isEpistemicEnabled,
   loadEpistemicKnowledge,
   saveEpistemicKnowledge,
+  resetEpistemicWarnFlag,
 } from './epistemic.js';
 import { hideChatMessageRange } from '../../../../scripts/chats.js';
 import { generateRecap, displayRecap } from './recap.js';
@@ -2375,7 +2376,11 @@ export function bindSettingsUI(ctrl) {
       injectSceneHistory();
       injectArcs();
       injectStateLedger();
-      injectEpistemicKnowledge(characterName, characterName);
+      // Reset the warn flag so the catch-up final inject can prompt if needed,
+      // then pass warn=true so a single exact-fit dialog fires if the full list
+      // exceeds the current budget.
+      resetEpistemicWarnFlag();
+      injectEpistemicKnowledge(characterName, characterName, false, true, true);
       injectProfiles(characterName);
       updateEntityPanel(characterName);
       updateLongTermUI(characterName);

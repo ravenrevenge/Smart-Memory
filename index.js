@@ -132,6 +132,7 @@ import {
   extractEpistemicKnowledge,
   injectEpistemicKnowledge,
   loadAndInjectEpistemicKnowledge,
+  resetEpistemicWarnFlag,
 } from './epistemic.js';
 import {
   runStateCardExtraction,
@@ -546,7 +547,7 @@ async function onCharacterMessageRendered() {
         updateTokenDisplay();
         if (isEpistemicEnabled()) {
           await extractEpistemicKnowledge(sceneMessageBuffer, characterName);
-          injectEpistemicKnowledge(characterName, characterName, true);
+          injectEpistemicKnowledge(characterName, characterName, true, true);
         }
         sceneMessageBuffer = [];
         sceneBufferLastIndex = -1;
@@ -922,6 +923,9 @@ function onChatChanged() {
  */
 async function onChatChangedImpl() {
   ++chatLoadId;
+
+  // Reset per-load flags so warnings can fire again for the new chat.
+  resetEpistemicWarnFlag();
 
   // Dismiss any recap overlay from the previous chat immediately - it is modal
   // and blocks input, so leaving it up over the new chat is confusing.
@@ -1339,7 +1343,7 @@ async function onGroupWrapperFinished({ type } = {}) {
           const epistemicChar = selectedGroupCharacter || [...roundResponders][0] || null;
           if (epistemicChar) {
             await extractEpistemicKnowledge(sceneMessageBuffer, epistemicChar);
-            injectEpistemicKnowledge(epistemicChar, epistemicChar, true);
+            injectEpistemicKnowledge(epistemicChar, epistemicChar, true, true);
           }
         }
         sceneMessageBuffer = [];
