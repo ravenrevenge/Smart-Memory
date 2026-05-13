@@ -783,6 +783,35 @@ export function bindSettingsUI(ctrl) {
       reinjectAfterBudgetChange(ctrl.getSelectedCharacterName());
     });
 
+  $('#sm_reset_budgets').on('click', function () {
+    const cur = extension_settings[MODULE_NAME];
+    const budgetKeys = [
+      'longterm_inject_budget',
+      'session_inject_budget',
+      'scene_inject_budget',
+      'arcs_inject_budget',
+      'canon_inject_budget',
+      'profiles_inject_budget',
+      'relationships_inject_budget',
+      'epistemic_inject_budget',
+      'state_ledger_inject_budget',
+    ];
+    for (const key of budgetKeys) {
+      cur[key] = defaultSettings[key];
+    }
+    // Sync all slider DOM elements to the restored values.
+    for (const { setting, slider, display, fmt } of TUNABLE_TIERS) {
+      $(`#${slider}`).val(cur[setting]);
+      $(`#${display}`).text(fmt(cur[setting]));
+    }
+    // Sync the simple-mode total slider.
+    const total = totalBudgetFromSettings(cur);
+    $('#sm_total_budget').val(total);
+    $('#sm_total_budget_value').text(total);
+    saveSettingsDebounced();
+    reinjectAfterBudgetChange(ctrl.getSelectedCharacterName());
+  });
+
   // Apply initial mode on load.
   applySettingsMode(s.settings_mode ?? 'simple');
 
