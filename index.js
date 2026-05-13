@@ -1003,6 +1003,7 @@ async function onChatChangedImpl() {
 
     maybeInjectUnified();
     updateTokenDisplay();
+    autoTuneBudgets(selectedGroupCharacter);
     // Mark load complete so the trim toast can fire on the next injection cycle,
     // not immediately on load before the user has done anything.
     markChatLoadComplete();
@@ -1099,6 +1100,7 @@ async function onChatChangedImpl() {
   updateProfilesUI(loadProfiles(characterName));
   maybeInjectUnified();
   updateTokenDisplay();
+  autoTuneBudgets(characterName);
   updateEmbeddingNotice();
 
   // Show a recap popup if the user has been away long enough.
