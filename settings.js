@@ -104,7 +104,13 @@ import { runModelTest } from './model-test.js';
 /** Set to true while a model test is running to allow cancellation. */
 let modelTestRunning = false;
 import { checkContinuity, generateRepair, injectRepair } from './continuity.js';
-import { getHardwareProfile, getEmbeddingBatch, clearEmbeddingFailed } from './embeddings.js';
+import {
+  getHardwareProfile,
+  getEmbeddingBatch,
+  clearEmbeddingFailed,
+  saveEmbeddingApiKey,
+  hasEmbeddingApiKey,
+} from './embeddings.js';
 import { clearCanon, generateCanon, injectCanon, saveCanon } from './canon.js';
 import { clearSessionEntityRegistry } from './graph-migration.js';
 import {
@@ -2776,12 +2782,17 @@ export function bindSettingsUI(ctrl) {
     const isOllama = src === 'ollama';
     $('#sm_embedding_model_ollama_row').toggle(isOllama);
     $('#sm_embedding_model_openai_row').toggle(!isOllama);
+    $('#sm_embedding_api_key_row').toggle(!isOllama);
     $('#sm_embedding_keep_row').toggle(isOllama);
     $('#sm_embedding_install_hint_ollama').toggle(isOllama);
     $('#sm_embedding_install_hint_openai').toggle(!isOllama);
     if (!isOllama) {
       // Sync the OpenAI model text field with the stored setting.
       $('#sm_embedding_model_openai').val(extension_settings[MODULE_NAME].embedding_model ?? '');
+      // Show whether a key is stored - never populate the field with the actual value.
+      $('#sm_embedding_api_key')
+        .val('')
+        .attr('placeholder', hasEmbeddingApiKey() ? '(key stored)' : 'sk-...');
     }
   }
 
@@ -2849,6 +2860,17 @@ export function bindSettingsUI(ctrl) {
     $('#sm_embedding_test_result').text('');
     updateEmbeddingNotice();
     saveSettingsDebounced();
+  });
+
+  // OpenAI Compatible API key field - saved to ST's secrets store, never to extension_settings.
+  $('#sm_embedding_api_key').on('change', async function () {
+    const value = $(this).val().trim();
+    await saveEmbeddingApiKey(value);
+    $(this)
+      .val('')
+      .attr('placeholder', hasEmbeddingApiKey() ? '(key stored)' : 'sk-...');
+    clearEmbeddingFailed();
+    $('#sm_embedding_test_result').text('');
   });
 
   applyEmbeddingSourceUI();
