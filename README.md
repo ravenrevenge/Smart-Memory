@@ -418,7 +418,7 @@ If you do not have an embedding model set up, Smart Memory falls back to keyword
 ollama pull nomic-embed-text
 ```
 
-**OpenAI Compatible:** Set the embedding source to "OpenAI Compatible", enter the base URL of your server, and type the model name it exposes for embeddings. Works with any server that implements the `/v1/embeddings` endpoint.
+**OpenAI Compatible:** Set the embedding source to "OpenAI Compatible", enter the base URL of your server, and type the model name it exposes for embeddings. Works with any server that implements the `/v1/embeddings` endpoint. If your server requires an API key, enter it in the API key field - it is stored in extension settings alongside other Smart Memory configuration.
 
 ### Relationship History
 
