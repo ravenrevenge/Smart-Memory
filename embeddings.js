@@ -44,7 +44,8 @@
  * hasEmbeddingApiKey  - returns true when an API key is configured
  */
 
-import { extension_settings, saveSettingsDebounced } from '../../../extensions.js';
+import { extension_settings } from '../../../extensions.js';
+import { saveSettingsDebounced } from '../../../../script.js';
 import { MODULE_NAME } from './constants.js';
 import { memory_sources } from './generate.js';
 import { cosineSimilarity, jaccardSimilarity, hasStateChangeMarker } from './similarity.js';
