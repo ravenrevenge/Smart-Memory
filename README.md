@@ -706,7 +706,7 @@ The `{{smartmemory-unified}}` macro is only active when **Unified injection** is
 
 ## Architecture
 
-Not required reading for using the extension. The [architecture diagram](docs/architecture.html) is a technical overview of Smart Memory's internal structure - intended for developers who want to understand how the tiers, extraction pipeline, and storage system fit together.
+Not required reading for using the extension. The [architecture diagram](https://senjinthedragon.github.io/Smart-Memory/architecture.html) is a technical overview of Smart Memory's internal structure - intended for developers who want to understand how the tiers, extraction pipeline, and storage system fit together.
 
 ---
 
