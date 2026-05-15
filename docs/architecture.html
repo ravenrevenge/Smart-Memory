@@ -30,6 +30,7 @@
     --c-t3:      oklch(0.78 0.14 330);  /* magenta */
     --c-t4:      oklch(0.78 0.14 350);  /* pink */
     --c-dedup:   oklch(0.78 0.14 10);   /* coral */
+    --c-consol:  oklch(0.78 0.14 215);  /* periwinkle */
     --c-mig:     oklch(0.78 0.14 100);  /* lime */
     --c-store:   oklch(0.78 0.14 175);  /* teal */
     --c-tokens:  oklch(0.80 0.14 90);   /* yellow */
@@ -313,6 +314,7 @@
   .s-t3       { --accent: var(--c-t3); }
   .s-t4       { --accent: var(--c-t4); }
   .s-dedup    { --accent: var(--c-dedup); }
+  .s-consol   { --accent: var(--c-consol); }
   .s-mig      { --accent: var(--c-mig); }
   .s-store    { --accent: var(--c-store); }
   .s-tokens   { --accent: var(--c-tokens); }
@@ -459,7 +461,7 @@
     </div>
     <div class="meta">
       <div class="row"><span class="dot"></span><span class="k">status</span><span class="v">production</span></div>
-      <div class="row"><span class="k">tiers</span><span class="v">4 extraction + dedup + injection</span></div>
+      <div class="row"><span class="k">tiers</span><span class="v">4 extraction + dedup + consolidation + injection</span></div>
       <div class="row"><span class="k">profiles</span><span class="v">A · Ollama/WebLLM &nbsp; B · Main/OpenAI</span></div>
       <div class="row"><span class="k">storage</span><span class="v">extension_settings + chatMetadata</span></div>
       <div class="row"><span class="k">injection slots</span><span class="v">13 named</span></div>
@@ -477,6 +479,7 @@
     <span class="item"><span class="sw" style="background:var(--c-t3)"></span>T3 · Batch Extraction</span>
     <span class="item"><span class="sw" style="background:var(--c-t4)"></span>T4 · Derived Layers</span>
     <span class="item"><span class="sw" style="background:var(--c-dedup)"></span>Deduplication</span>
+    <span class="item"><span class="sw" style="background:var(--c-consol)"></span>Consolidation</span>
     <span class="item"><span class="sw" style="background:var(--c-mig)"></span>Migration</span>
     <span class="item"><span class="sw" style="background:var(--c-store)"></span>Storage</span>
     <span class="item"><span class="sw" style="background:var(--c-tokens)"></span>Token Mgmt</span>
@@ -867,8 +870,98 @@
             <li class="k">DE1 → DE2 + DE7</li>
             <li class="k">DE3 ⇢ DE2 (fallback)</li>
             <li class="k">DE2 → DE4 → DE5 + DE6</li>
-            <li class="mute">classified writes → Storage</li>
+            <li class="mute">classified writes → Consolidation</li>
           </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── 07 CONSOLIDATION ───────────────────── -->
+    <section class="section s-consol" data-arch="consol">
+      <div class="section-head">
+        <div class="title-wrap">
+          <span class="num">07 · Consolidation</span>
+          <h2>🧩 Consolidation — <code style="font-family:var(--mono);font-size:18px;color:var(--ink-2)">consolidation.js</code></h2>
+        </div>
+        <div class="blurb">Fires after dedup classification, before storage write. Per-type thresholds; LLM merges near-identical entries into richer single ones.</div>
+      </div>
+
+      <div class="nodes cols-3">
+        <div class="node">
+          <div class="ntitle">Trigger <span class="tag">CN1</span></div>
+          <ul>
+            <li>fires when entry count for a type crosses its threshold</li>
+            <li>per-type counters tracked independently</li>
+            <li class="mute">runs after dedup · before storage write</li>
+          </ul>
+        </div>
+        <div class="node">
+          <div class="ntitle">Merge prompt <span class="tag">CN2</span></div>
+          <ul>
+            <li>collects candidates for a single type</li>
+            <li>asks model to merge near-identical / redundant entries</li>
+            <li class="k">output: fewer, richer entries</li>
+            <li class="mute">replaced entries retired via supersession</li>
+          </ul>
+        </div>
+        <div class="node">
+          <div class="ntitle">Scope <span class="tag">CN3</span></div>
+          <ul>
+            <li>runs for both long-term and session memory</li>
+            <li class="mute">independent per-tier passes</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="arch-grid" style="gap:14px; margin-top:14px">
+        <div class="zone" style="--accent: var(--c-consol)">
+          <div class="zone-head">
+            <span class="zh-title">Long-term thresholds</span>
+            <span class="zh-note">per type · independent counters</span>
+          </div>
+          <div class="nodes cols-4">
+            <div class="node" style="--accent: var(--c-consol)">
+              <div class="ntitle">fact <span class="tag">CN-L1</span></div>
+              <ul><li>threshold-gated merge pass</li><li class="mute">stable knowledge synthesis</li></ul>
+            </div>
+            <div class="node" style="--accent: var(--c-consol)">
+              <div class="ntitle">relationship <span class="tag">CN-L2</span></div>
+              <ul><li>threshold-gated merge pass</li><li class="mute">descriptors collapsed</li></ul>
+            </div>
+            <div class="node" style="--accent: var(--c-consol)">
+              <div class="ntitle">preference <span class="tag">CN-L3</span></div>
+              <ul><li>threshold-gated merge pass</li><li class="mute">duplicates folded</li></ul>
+            </div>
+            <div class="node" style="--accent: var(--c-consol)">
+              <div class="ntitle">event <span class="tag">CN-L4</span></div>
+              <ul><li>threshold-gated merge pass</li><li class="mute">co-occurring events combined</li></ul>
+            </div>
+          </div>
+        </div>
+
+        <div class="zone" style="--accent: var(--c-consol)">
+          <div class="zone-head">
+            <span class="zh-title">Session thresholds</span>
+            <span class="zh-note">per type · independent counters</span>
+          </div>
+          <div class="nodes cols-4">
+            <div class="node" style="--accent: var(--c-consol)">
+              <div class="ntitle">scene <span class="tag">CN-S1</span></div>
+              <ul><li>threshold-gated merge pass</li><li class="mute">contiguous scenes folded</li></ul>
+            </div>
+            <div class="node" style="--accent: var(--c-consol)">
+              <div class="ntitle">revelation <span class="tag">CN-S2</span></div>
+              <ul><li>threshold-gated merge pass</li><li class="mute">overlapping reveals merged</li></ul>
+            </div>
+            <div class="node" style="--accent: var(--c-consol)">
+              <div class="ntitle">development <span class="tag">CN-S3</span></div>
+              <ul><li>threshold-gated merge pass</li><li class="mute">arc beats coalesced</li></ul>
+            </div>
+            <div class="node" style="--accent: var(--c-consol)">
+              <div class="ntitle">detail <span class="tag">CN-S4</span></div>
+              <ul><li>threshold-gated merge pass</li><li class="mute">redundant details collapsed</li></ul>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -878,7 +971,7 @@
       <section class="section s-store" data-arch="store">
         <div class="section-head">
           <div class="title-wrap">
-            <span class="num">07 · Storage</span>
+            <span class="num">08 · Storage</span>
             <h2>💾 Two-Tier Storage</h2>
           </div>
           <div class="blurb">Persistent identity vs. ephemeral session state. Reset semantics differ by tier.</div>
@@ -956,7 +1049,7 @@
       <section class="section s-mig" data-arch="mig">
         <div class="section-head">
           <div class="title-wrap">
-            <span class="num">08 · Migrations</span>
+            <span class="num">09 · Migrations</span>
             <h2>🔄 Schema Migration</h2>
           </div>
           <div class="blurb">graph-migration.js — never destructive.</div>
@@ -976,7 +1069,7 @@
         <div style="margin-top:14px">
           <div class="section-head" style="margin-bottom:12px; padding-bottom:10px">
             <div class="title-wrap">
-              <span class="num" style="--accent: var(--c-tokens); color: var(--c-tokens); border-color: color-mix(in oklch, var(--c-tokens) 50%, transparent); background: color-mix(in oklch, var(--c-tokens) 8%, transparent)">09 · Token Mgmt</span>
+              <span class="num" style="--accent: var(--c-tokens); color: var(--c-tokens); border-color: color-mix(in oklch, var(--c-tokens) 50%, transparent); background: color-mix(in oklch, var(--c-tokens) 8%, transparent)">10 · Token Mgmt</span>
               <h2 style="font-size:18px">📊 Budgets</h2>
             </div>
           </div>
@@ -1008,7 +1101,7 @@
             <div class="node" style="--accent: var(--c-tokens)">
               <div class="ntitle">Adaptive budgets <span class="tag">TK4</span></div>
               <ul>
-                <li>turn classifier: action · dialogue · introspection · description</li>
+                <li>turn classifier: dialogue · action · transition · intimate</li>
                 <li>per-tier multipliers applied per turn</li>
               </ul>
             </div>
@@ -1025,17 +1118,17 @@
     <section class="section s-inject" data-arch="inject">
       <div class="section-head">
         <div class="title-wrap">
-          <span class="num">10 · Injection</span>
+          <span class="num">11 · Injection</span>
           <h2>💉 setExtensionPrompt · 13 named slots</h2>
         </div>
         <div class="blurb">Anchored slots vs. depth-relative slots vs. unified single-block mode.</div>
       </div>
 
-      <div class="arch-grid" style="gap:14px">
+        <div class="arch-grid" style="gap:14px">
         <div class="zone" style="--accent: var(--c-inject)">
           <div class="zone-head">
             <span class="zh-title">IN_PROMPT · anchored at character-card depth</span>
-            <span class="zh-note">7 slots</span>
+            <span class="zh-note">4 slots</span>
           </div>
           <div class="nodes cols-4">
             <div class="node" style="--accent: var(--c-inject)">
@@ -1045,18 +1138,6 @@
             <div class="node" style="--accent: var(--c-inject)">
               <div class="ntitle">smart_memory_long <span class="tag">IJ2</span></div>
               <ul><li>long-term memories</li></ul>
-            </div>
-            <div class="node" style="--accent: var(--c-inject)">
-              <div class="ntitle">smart_memory_session <span class="tag">IJ4</span></div>
-              <ul><li>session memories</li></ul>
-            </div>
-            <div class="node" style="--accent: var(--c-inject)">
-              <div class="ntitle">smart_memory_scenes <span class="tag">IJ5 · depth 6</span></div>
-              <ul><li>scene history</li></ul>
-            </div>
-            <div class="node" style="--accent: var(--c-inject)">
-              <div class="ntitle">smart_memory_arcs <span class="tag">IJ6 · depth 2</span></div>
-              <ul><li>story arcs</li></ul>
             </div>
             <div class="node" style="--accent: var(--c-inject)">
               <div class="ntitle">smart_memory_profiles <span class="tag">IJ8 · depth 1</span></div>
@@ -1072,7 +1153,7 @@
         <div class="zone" style="--accent: var(--c-t2)">
           <div class="zone-head">
             <span class="zh-title">IN_CHAT · depth-relative to current message</span>
-            <span class="zh-note">5 slots</span>
+            <span class="zh-note">8 slots</span>
           </div>
           <div class="nodes cols-4">
             <div class="node" style="--accent: var(--c-t2)">
@@ -1081,6 +1162,18 @@
                 <li>contextual relevance reinjection</li>
                 <li class="mute">memories overlapping current turn</li>
               </ul>
+            </div>
+            <div class="node" style="--accent: var(--c-t2)">
+              <div class="ntitle">smart_memory_session <span class="tag">IJ4</span></div>
+              <ul><li>session memories</li></ul>
+            </div>
+            <div class="node" style="--accent: var(--c-t2)">
+              <div class="ntitle">smart_memory_scenes <span class="tag">IJ5 · depth 6</span></div>
+              <ul><li>scene history</li></ul>
+            </div>
+            <div class="node" style="--accent: var(--c-t2)">
+              <div class="ntitle">smart_memory_arcs <span class="tag">IJ6 · depth 2</span></div>
+              <ul><li>story arcs</li></ul>
             </div>
             <div class="node" style="--accent: var(--c-t2)">
               <div class="ntitle">smart_memory_relationships <span class="tag">IJ7 · depth 5</span></div>
@@ -1128,7 +1221,7 @@
       <section class="section s-macro" data-arch="macros">
         <div class="section-head">
           <div class="title-wrap">
-            <span class="num">11 · Macros</span>
+            <span class="num">12 · Macros</span>
             <h2>🔧 macros.js</h2>
           </div>
           <div class="blurb">{{smartmemory-*}} tokens that resolve at prompt-assembly time.</div>
@@ -1138,7 +1231,7 @@
             <div class="ntitle">Token registry <span class="tag">MA1</span></div>
             <ul>
               <li>11 {{smartmemory-*}} tokens</li>
-              <li class="k">9 per-tier + {{smartmemory-unified}}</li>
+              <li class="k">10 per-tier + {{smartmemory-unified}}</li>
             </ul>
           </div>
           <div class="node">
@@ -1171,7 +1264,7 @@
       <section class="section s-recap" data-arch="recap">
         <div class="section-head">
           <div class="title-wrap">
-            <span class="num">12 · Auxiliary</span>
+            <span class="num">13 · Auxiliary</span>
             <h2>🌅 Recap &amp; 🧪 Model Test</h2>
           </div>
           <div class="blurb">Out-of-band UX surfaces — recap on return, validation harness for model selection.</div>
@@ -1254,9 +1347,10 @@
     // both feed the extraction pipeline
     { from:'[data-arch="gen"]',     to:'[data-arch="pipe"]',  cFrom:'--c-gen',   cTo:'--c-t2',  fromFx:0.55, toFx:0.30 },
     { from:'[data-arch="hw"]',      to:'[data-arch="pipe"]',  cFrom:'--c-hw',    cTo:'--c-t2',  fromFx:0.45, toFx:0.70 },
-    // pipeline → dedup → storage
+    // pipeline → dedup → consolidation → storage
     { from:'[data-arch="pipe"]',    to:'[data-arch="dedup"]', cFrom:'--c-t4',    cTo:'--c-dedup' },
-    { from:'[data-arch="dedup"]',   to:'[data-arch="store"]', cFrom:'--c-dedup', cTo:'--c-store', fromFx:0.40, toFx:0.5 },
+    { from:'[data-arch="dedup"]',   to:'[data-arch="consol"]',cFrom:'--c-dedup', cTo:'--c-consol' },
+    { from:'[data-arch="consol"]',  to:'[data-arch="store"]', cFrom:'--c-consol',cTo:'--c-store', fromFx:0.40, toFx:0.5 },
     // migrations join storage horizontally; mig column also feeds injection
     { from:'[data-arch="mig"]',     to:'[data-arch="store"]', cFrom:'--c-mig',   cTo:'--c-store', horizontal:true },
     { from:'[data-arch="store"]',   to:'[data-arch="inject"]',cFrom:'--c-store', cTo:'--c-inject', fromFx:0.55, toFx:0.35 },
@@ -1293,10 +1387,10 @@
     // soft glow
     const f = document.createElementNS(NS, 'filter');
     f.setAttribute('id', 'glow');
-    f.setAttribute('x', '-50%'); f.setAttribute('y', '-50%');
-    f.setAttribute('width', '200%'); f.setAttribute('height', '200%');
+    f.setAttribute('x', '-200%'); f.setAttribute('y', '-200%');
+    f.setAttribute('width', '500%'); f.setAttribute('height', '500%');
     f.innerHTML = `
-      <feGaussianBlur stdDeviation="2.4" result="b"/>
+      <feGaussianBlur stdDeviation="2" result="b"/>
       <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
     `;
     defs.appendChild(f);
@@ -1366,15 +1460,15 @@
       paths.push({ d, i, sx, sy, ex, ey, cFrom: lnk.cFrom, cTo: lnk.cTo });
     });
 
-    // halos (wide, faint)
+    // halos (wide, faint) — also serves as glow for short links the filter can't reach
     paths.forEach(({ d, i }) => {
       const halo = document.createElementNS(NS, 'path');
       halo.setAttribute('d', d);
       halo.setAttribute('fill', 'none');
       halo.setAttribute('stroke', `url(#lg${i})`);
-      halo.setAttribute('stroke-width', '8');
+      halo.setAttribute('stroke-width', '7');
       halo.setAttribute('stroke-linecap', 'round');
-      halo.setAttribute('opacity', '0.10');
+      halo.setAttribute('opacity', '0.22');
       svg.appendChild(halo);
     });
 
@@ -1384,9 +1478,9 @@
       p.setAttribute('d', d);
       p.setAttribute('fill', 'none');
       p.setAttribute('stroke', `url(#lg${i})`);
-      p.setAttribute('stroke-width', '1.4');
+      p.setAttribute('stroke-width', '1.7');
       p.setAttribute('stroke-linecap', 'round');
-      p.setAttribute('opacity', '0.92');
+      p.setAttribute('opacity', '1');
       p.setAttribute('filter', 'url(#glow)');
       svg.appendChild(p);
     });
