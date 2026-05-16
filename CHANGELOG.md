@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Auto-tune budgets** applies immediately when the checkbox is enabled, using
   whatever trim data has already been collected in the current session. Previously
   it only ran after the next injection pass.
+- **Group character token bar rows are now clickable.** Clicking a character's
+  row in the per-character token bar selects that character for memory
+  inspection, replacing the separate "Viewing memories for" dropdown. Rows show
+  a pointer cursor and a hover highlight to signal interactivity.
 
 ### Fixed
 
@@ -32,6 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A high water mark tracks the maximum token demand per tier across all injection
   passes, so a character with lighter memories can no longer push the budget down
   below what a heavier character in the same chat needs.
+- **Auto-tune budgets** now re-tunes immediately when switching the group
+  character panel selector. Previously the selector switch would reinject the
+  new character's memories at the wrong budget and leave the trim indicator
+  without self-correcting until the next generation.
 
 ## [1.7.4] - 2026-05-16
 
