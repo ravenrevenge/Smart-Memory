@@ -1047,9 +1047,6 @@ async function onChatChangedImpl() {
     return;
   }
 
-  // 1:1 chat - hide the group selector so it doesn't bleed between chat types.
-  $('#sm_group_char_row').hide();
-
   const characterName = getCurrentCharacterName();
 
   // Migrate character data now that we know which character is active.
@@ -1186,8 +1183,6 @@ function updateGroupCharSelector() {
     selectedGroupCharacter = members[0];
     $select.val(selectedGroupCharacter);
   }
-
-  $('#sm_group_char_row').show();
 }
 
 // ---- Group chat handlers ------------------------------------------------
