@@ -139,6 +139,8 @@ When you merge two entities that both have state cards, a modal asks which card 
 
 The section is off by default on Profile A hardware (local/low-VRAM) because weaker models tend to pad unknown fields with placeholder values - an override toggle enables it when the local model is reasoning-capable.
 
+**Tip:** Both Perspectives & Secrets and State Ledger inject close to the active turn by default, which gives stronger models better attention on the content. If your model starts including memory content verbatim in its responses, switch these tiers to **In-Prompt** injection in the Advanced settings - this moves them clearly outside the conversation flow and stops the leaking.
+
 ### Session Memory - Within-Chat Details
 
 Granular details from the current session: scene descriptions, things that were revealed, how the relationship shifted, specific objects or places that came up. More detailed than long-term memory, and scoped to this chat only - it does not carry forward to future sessions, but it keeps the AI sharp on the specifics of what is happening right now.
