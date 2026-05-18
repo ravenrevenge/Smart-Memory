@@ -72,10 +72,6 @@ That's it - Smart Memory will start building memories automatically from your ne
 
 Smart Memory runs several memory systems in the background, each focused on a different slice of your story's history.
 
-### Bringing Existing Chats In
-
-Already have chats that predate Smart Memory? The [Manual Operations](#manual-operations) section covers the tools for this - **Memorize Chat** reads through an existing chat and builds the full set of memories, scene history, arcs, and summary from it. Run it on any older chat to bring that character's history into the system.
-
 ### Token Usage Display
 
 A small bar in the settings panel shows how many tokens each memory tier is currently using in the AI's context. It updates after every response so you can see at a glance whether Smart Memory is taking up a sensible amount of your context.
@@ -88,58 +84,11 @@ When a tier is actively trimming content to fit its budget, its segment on the b
 
 Facts, relationship history, preferences, and significant events are extracted from your chats and saved for each character. These memories survive across all sessions - when you open a new chat with a character, everything they have learned is already there waiting.
 
-### Relationship History
-
-Alongside individual memories, Smart Memory tracks the current emotional state of every named relationship as a set of descriptors - words like `warm`, `cautious`, `fragile`, `mistrustful`. Each descriptor carries its own magnitude (`low`, `medium`, `high`), displayed as `word(magnitude)` - e.g. `trusting(high), cautious(medium)`. After each extraction pass the model reviews the scene and emits any shifts; new descriptors are merged in and existing ones updated rather than replaced, so the state accumulates across sessions without losing earlier signals. A maximum of six descriptors per pair is kept; the lowest-magnitude entry is dropped when the cap is exceeded.
-
-The **Relationship History** section in the settings panel shows all tracked pairs for the current character. You can add pairs manually (useful for seeding a relationship described in the character card), edit any pair to correct or refine the descriptors, and delete pairs that are no longer relevant. Relationship History is cleared alongside long-term memories when you use **Clear Memories** or **Fresh Start**.
-
-Only pairs whose names appear in the recent message window are injected into context, so the block stays small even for characters with many relationships.
-
 Over time, memories are automatically consolidated so the same information does not pile up in slightly different forms. Smart Memory is good at recognising when two differently-worded entries are saying the same thing, so you end up with a clean, rich picture of the character rather than a growing cluttered list.
 
 When a new memory describes a change - "Alex no longer distrusts Finn", "she moved to the capital", "the guild was disbanded" - the old fact is automatically retired and replaced rather than left alongside the newer truth as a contradiction.
 
 Each memory is assigned a set of **activation triggers** - keywords derived automatically from its content. When a trigger appears in the current chat turn, that memory gets a scoring boost so it rises to the top of what gets injected into context. Memories that fire a trigger are also placed in a secondary slot closer to the prompt, so the AI sees them right before it responds. You do not need to configure anything for this - it runs automatically.
-
-### Perspectives & Secrets
-
-At each scene break, Smart Memory extracts a per-character knowledge map: what each named character knows, suspects, falsely believes, is unaware of, and is actively hiding from someone else. The responding character's knowledge block is then injected privately into their prompt, so the AI can maintain perspective-accurate behaviour - knowing what to reveal, what to deflect, and what they genuinely do not know.
-
-The five tags map to distinct epistemic states:
-
-- **Knows** - facts the character is confident about
-- **Suspects** - things they believe but have not confirmed
-- **Believes (false)** - things they are sure of that are actually wrong (dramatic irony)
-- **Unaware** - things they do not know and have not guessed
-- **Hiding** - things they know but are actively concealing from a specific other character
-
-The **Perspectives & Secrets** section in the settings panel shows all extracted entries for the current character. You can add entries manually, edit existing ones, and delete entries that are no longer relevant. The section is collapsed by default on Profile A hardware (local/low-VRAM) where extraction requires a reasoning-capable model - an override toggle in the section enables it when the hardware can handle it.
-
-**Believes** and **Hiding** entries are kept behind a spoiler block at the bottom of the list. It is collapsed by default and requires confirming a warning before it opens, so you do not accidentally reveal secrets that would spoil a mystery scenario. The block is always visible even when empty so you can tell at a glance whether any spoiler-type entries were extracted.
-
-When the entry list grows beyond the injection budget, Smart Memory will ask whether to increase the budget for this roleplay. In normal play the budget grows in 100-token increments per confirmation; after **Memorize Chat** a single dialog sets the exact size needed plus 100 tokens of headroom. The increase applies only to the current chat and does not change the settings slider.
-
-Long-term memories also benefit: memories extracted from a scene the responding character was not present for are labelled `[secondhand]` in their injection, so the AI knows the character learned this through hearsay rather than direct experience. This can be turned off to omit non-witnessed memories entirely.
-
-### State Ledger
-
-The State Ledger tracks the current observable physical and operational state of named entities as a compact snapshot injected near the active turn. Where long-term memory records permanent facts ("Kael was once a soldier") and session memory records developing details, the State Ledger answers right now questions: where is Kael standing, what is he wearing, what is he carrying, what is the room's current state.
-
-State cards are maintained per entity type:
-
-- **Character** - location, injuries, outfit/disguise, mood, active goal, carried items
-- **Object** - owner, location, condition, status
-- **Place** - occupants, hazards, political control, damage, accessibility
-- **Faction** - leadership, objective, alliances, hostility level
-
-Extraction runs once per session against the current message window. State cards are chat-scoped and do not carry over when a new chat begins. Cards can also be filled in or edited manually from the entity panel - click the edit button below any entity row to open the field editor.
-
-When you merge two entities that both have state cards, a modal asks which card to keep. Deleting an entity with a state card shows a warning before proceeding. Changing an entity's type migrates its state card to the new type automatically.
-
-The section is off by default on Profile A hardware (local/low-VRAM) because weaker models tend to pad unknown fields with placeholder values - an override toggle enables it when the local model is reasoning-capable.
-
-**Tip:** Both Perspectives & Secrets and State Ledger inject close to the active turn by default, which gives stronger models better attention on the content. If your model starts including memory content verbatim in its responses, switch these tiers to **In-Prompt** injection in the Advanced settings - this moves them clearly outside the conversation flow and stops the leaking.
 
 ### Session Memory - Within-Chat Details
 
@@ -186,6 +135,68 @@ After each extraction pass, Smart Memory generates compact state snapshots from 
 Profiles are regenerated after each extraction pass and on chat load if stale. On Profile B, an optional message-count schedule can keep them fresh between extraction passes. A manual regenerate button is available in the settings panel.
 
 In group chats, each character has their own independent profile. Switching the character selector updates the profiles panel to show that character's snapshot, and each character's profile is added to context when they are about to respond.
+
+### Relationship History
+
+Alongside individual memories, Smart Memory tracks the current emotional state of every named relationship as a set of descriptors - words like `warm`, `cautious`, `fragile`, `mistrustful`. Each descriptor carries its own magnitude (`low`, `medium`, `high`), displayed as `word(magnitude)` - e.g. `trusting(high), cautious(medium)`. After each extraction pass the model reviews the scene and emits any shifts; new descriptors are merged in and existing ones updated rather than replaced, so the state accumulates across sessions without losing earlier signals. A maximum of six descriptors per pair is kept; the lowest-magnitude entry is dropped when the cap is exceeded.
+
+The **Relationship History** section in the settings panel shows all tracked pairs for the current character. You can add pairs manually (useful for seeding a relationship described in the character card), edit any pair to correct or refine the descriptors, and delete pairs that are no longer relevant. Relationship History is cleared alongside long-term memories when you use **Clear Memories** or **Fresh Start**.
+
+Only pairs whose names appear in the recent message window are injected into context, so the block stays small even for characters with many relationships.
+
+### Perspectives & Secrets
+
+At each scene break, Smart Memory extracts a per-character knowledge map: what each named character knows, suspects, falsely believes, is unaware of, and is actively hiding from someone else. The responding character's knowledge block is then injected privately into their prompt, so the AI can maintain perspective-accurate behaviour - knowing what to reveal, what to deflect, and what they genuinely do not know.
+
+The five tags map to distinct epistemic states:
+
+- **Knows** - facts the character is confident about
+- **Suspects** - things they believe but have not confirmed
+- **Believes (false)** - things they are sure of that are actually wrong (dramatic irony)
+- **Unaware** - things they do not know and have not guessed
+- **Hiding** - things they know but are actively concealing from a specific other character
+
+The **Perspectives & Secrets** section in the settings panel shows all extracted entries for the current character. You can add entries manually, edit existing ones, and delete entries that are no longer relevant. The section is collapsed by default on Profile A hardware (local/low-VRAM) where extraction requires a reasoning-capable model - an override toggle in the section enables it when the hardware can handle it.
+
+**Believes** and **Hiding** entries are kept behind a spoiler block at the bottom of the list. It is collapsed by default and requires confirming a warning before it opens, so you do not accidentally reveal secrets that would spoil a mystery scenario. The block is always visible even when empty so you can tell at a glance whether any spoiler-type entries were extracted.
+
+When the entry list grows beyond the injection budget, Smart Memory will ask whether to increase the budget for this roleplay. In normal play the budget grows in 100-token increments per confirmation; after **Memorize Chat** a single dialog sets the exact size needed plus 100 tokens of headroom. The increase applies only to the current chat and does not change the settings slider.
+
+Long-term memories also benefit: memories extracted from a scene the responding character was not present for are labelled `[secondhand]` in their injection, so the AI knows the character learned this through hearsay rather than direct experience. This can be turned off to omit non-witnessed memories entirely.
+
+### Entity Registry
+
+As memories are extracted, Smart Memory tracks the named entities behind them - characters, places, objects, factions, and concepts. The AI classifies each entity by type from the context of the memory it appeared in, so invented names and made-up settings are handled just as well as real-world ones. The registry is built from both your long-term memories and your current session memories, and is updated after each extraction pass.
+
+A collapsible **Entity Registry** panel in the settings shows all tracked entities with:
+
+- Type badge (character / place / object / faction / concept) - click to edit if the classification is wrong
+- Number of memories referencing the entity
+- Last seen message index
+- A **timeline button** that expands a vertical timeline of all memories involving that entity, ordered chronologically, with retired entries shown in muted style
+- A **merge button** to combine two entities into one - useful when the model has created separate entries for the same person under different names, or when you want to collapse entries from different tiers together
+- A **trash button** to remove an entity entirely, which also cleans up all references to it from stored memories
+
+A **View Graph** button opens a full-screen, force-directed canvas of your character's entire memory network. Entity nodes (larger, coloured by type) are connected to the memories that reference them. Where one memory has replaced another, a directed arrow shows the supersession chain so you can see exactly what was retired and what replaced it. The graph supports pan, zoom, node dragging, click-to-highlight neighbours, and hover tooltips with full memory content. Filters for session memories and retired memories can be toggled on and off without closing the graph. The graph follows your active SillyTavern theme automatically.
+
+### State Ledger
+
+The State Ledger tracks the current observable physical and operational state of named entities as a compact snapshot injected near the active turn. Where long-term memory records permanent facts ("Kael was once a soldier") and session memory records developing details, the State Ledger answers right now questions: where is Kael standing, what is he wearing, what is he carrying, what is the room's current state.
+
+State cards are maintained per entity type:
+
+- **Character** - location, injuries, outfit/disguise, mood, active goal, carried items
+- **Object** - owner, location, condition, status
+- **Place** - occupants, hazards, political control, damage, accessibility
+- **Faction** - leadership, objective, alliances, hostility level
+
+Extraction runs once per session against the current message window. State cards are chat-scoped and do not carry over when a new chat begins. Cards can also be filled in or edited manually from the entity panel - click the edit button below any entity row to open the field editor.
+
+When you merge two entities that both have state cards, a modal asks which card to keep. Deleting an entity with a state card shows a warning before proceeding. Changing an entity's type migrates its state card to the new type automatically.
+
+The section is off by default on Profile A hardware (local/low-VRAM) because weaker models tend to pad unknown fields with placeholder values - an override toggle enables it when the local model is reasoning-capable.
+
+**Tip:** Both Perspectives & Secrets and State Ledger inject close to the active turn by default, which gives stronger models better attention on the content. If your model starts including memory content verbatim in its responses, switch these tiers to **In-Prompt** injection in the Advanced settings - this moves them clearly outside the conversation flow and stops the leaking.
 
 ### Away Recap
 
@@ -286,6 +297,8 @@ You are the judge. The hint on each tier tells you what to expect; the raw outpu
 
 ## Manual Operations
 
+Already have chats that predate Smart Memory? **Memorize Chat** reads through an existing chat and builds the full set of memories, scene history, arcs, and summary from it. Run it on any older chat to bring that character's history into the system.
+
 ### Memorize Chat
 
 Reads the full chat history and builds memories from it - long-term facts, session details, scene history, story arcs, summary, and profiles. Use this to bring Smart Memory up to speed on an existing chat, or to build up a character's long-term memories from older sessions.
@@ -369,7 +382,7 @@ Manual edits take effect immediately and are added to the prompt on the next mes
 
 ## Settings
 
-All settings are saved automatically. The tier sections (Long-term, Session, Short-term, etc.) are near the top of the extension panel. Hardware Profile, Memory LLM, and Memory Deduplication are in the **Configuration** accordion at the bottom of the panel.
+All settings are saved automatically. Hardware Profile, Memory LLM, and Memory Deduplication are in the **Configuration** accordion at the bottom of the extension panel.
 
 ### Simple and Advanced Mode
 
@@ -423,36 +436,6 @@ ollama pull nomic-embed-text
 ```
 
 **OpenAI Compatible:** Set the embedding source to "OpenAI Compatible", enter the base URL of your server, and type the model name it exposes for embeddings. Works with any server that implements the `/v1/embeddings` endpoint. If your server requires an API key, enter it in the API key field - it is stored in extension settings alongside other Smart Memory configuration.
-
-### Relationship History
-
-| Setting                     | Default | Description                                                                         |
-| --------------------------- | ------- | ----------------------------------------------------------------------------------- |
-| Enable relationship history | On      | Extract and inject per-pair emotional state across sessions                         |
-| Injection token budget      | 250     | Budget for the relationship block; funded from within the shared 3750 token default |
-| Injection position          | In-chat | Where the relationship block appears in the prompt                                  |
-| Injection depth             | 5       | Distance from the user prompt (lower = closer)                                      |
-
-### Perspectives & Secrets
-
-| Setting                               | Default        | Description                                                                                                                |
-| ------------------------------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Enable Perspectives & Secrets         | On (Profile B) | Extract and inject per-character knowledge maps at scene breaks. Off by default on Profile A; enable with the override    |
-| Enable on Profile A                   | Off            | Override to run epistemic extraction on Profile A hardware. Requires a reasoning-capable local model                      |
-| Inject "does not know" entries        | On             | Include what each character is unaware of in their knowledge block (for dramatic irony)                                    |
-| Frame secondhand long-term memories   | On             | Prefix long-term memories with `[secondhand]` when the responding character was not present for the scene they came from   |
-| Injection token budget                | 200            | Budget for the knowledge block; funded from within the shared total                                                       |
-| Injection position                    | In-chat        | Where the knowledge block appears in the prompt                                                                            |
-| Injection depth                       | 1              | Distance from the user prompt (lower = closer); depth 1 places it right after the most recent context                     |
-
-### State Ledger
-
-| Setting                | Default | Description                                                                                                                                              |
-| ---------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Enable State Ledger    | Off     | Extract and inject current entity state cards. On Profile A hardware a confirmation is shown first - this feature works best with a reasoning-capable model |
-| Injection token budget | 200     | Budget for the state block; funded from within the shared total                                                                                          |
-| Injection position     | In-chat | Where the state block appears in the prompt                                                                                                              |
-| Injection depth        | 1       | Distance from the user prompt (lower = closer)                                                                                                           |
 
 ### Long-term Memory
 
@@ -549,6 +532,36 @@ The **Generate Canon** button synthesizes a prose narrative from resolved arc su
 
 A live token count shows how much context the current profiles are using. A **Regenerate Profiles Now** button forces immediate regeneration. The current profiles are shown read-only below the controls.
 
+### Relationship History
+
+| Setting                     | Default | Description                                                                         |
+| --------------------------- | ------- | ----------------------------------------------------------------------------------- |
+| Enable relationship history | On      | Extract and inject per-pair emotional state across sessions                         |
+| Injection token budget      | 250     | Budget for the relationship block; funded from within the shared 3750 token default |
+| Injection position          | In-chat | Where the relationship block appears in the prompt                                  |
+| Injection depth             | 5       | Distance from the user prompt (lower = closer)                                      |
+
+### Perspectives & Secrets
+
+| Setting                               | Default        | Description                                                                                                                |
+| ------------------------------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Enable Perspectives & Secrets         | On (Profile B) | Extract and inject per-character knowledge maps at scene breaks. Off by default on Profile A; enable with the override    |
+| Enable on Profile A                   | Off            | Override to run epistemic extraction on Profile A hardware. Requires a reasoning-capable local model                      |
+| Inject "does not know" entries        | On             | Include what each character is unaware of in their knowledge block (for dramatic irony)                                    |
+| Frame secondhand long-term memories   | On             | Prefix long-term memories with `[secondhand]` when the responding character was not present for the scene they came from   |
+| Injection token budget                | 200            | Budget for the knowledge block; funded from within the shared total                                                       |
+| Injection position                    | In-chat        | Where the knowledge block appears in the prompt                                                                            |
+| Injection depth                       | 1              | Distance from the user prompt (lower = closer); depth 1 places it right after the most recent context                     |
+
+### State Ledger
+
+| Setting                | Default | Description                                                                                                                                              |
+| ---------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Enable State Ledger    | Off     | Extract and inject current entity state cards. On Profile A hardware a confirmation is shown first - this feature works best with a reasoning-capable model |
+| Injection token budget | 200     | Budget for the state block; funded from within the shared total                                                                                          |
+| Injection position     | In-chat | Where the state block appears in the prompt                                                                                                              |
+| Injection depth        | 1       | Distance from the user prompt (lower = closer)                                                                                                           |
+
 ### Away Recap
 
 | Setting      | Default | Description                                          |
@@ -562,23 +575,6 @@ A live token count shows how much context the current profiles are using. A **Re
 | ------------------------------ | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Auto-check after each response | On      | Profile B only. Run the continuity check automatically after every AI response. Turn this off to check manually while staying on Profile B                                                          |
 | Auto-repair contradictions     | Off     | Profile B only. When contradictions are found, generate a short corrective note and slip it into the next response. Cleared automatically after that response. Costs one extra model call per check |
-
----
-
-## Entity Registry
-
-As memories are extracted, Smart Memory tracks the named entities behind them - characters, places, objects, factions, and concepts. The AI classifies each entity by type from the context of the memory it appeared in, so invented names and made-up settings are handled just as well as real-world ones. The registry is built from both your long-term memories and your current session memories, and is updated after each extraction pass.
-
-A collapsible **Entity Registry** panel in the settings shows all tracked entities with:
-
-- Type badge (character / place / object / faction / concept) - click to edit if the classification is wrong
-- Number of memories referencing the entity
-- Last seen message index
-- A **timeline button** that expands a vertical timeline of all memories involving that entity, ordered chronologically, with retired entries shown in muted style
-- A **merge button** to combine two entities into one - useful when the model has created separate entries for the same person under different names, or when you want to collapse entries from different tiers together
-- A **trash button** to remove an entity entirely, which also cleans up all references to it from stored memories
-
-A **View Graph** button opens a full-screen, force-directed canvas of your character's entire memory network. Entity nodes (larger, coloured by type) are connected to the memories that reference them. Where one memory has replaced another, a directed arrow shows the supersession chain so you can see exactly what was retired and what replaced it. The graph supports pan, zoom, node dragging, click-to-highlight neighbours, and hover tooltips with full memory content. Filters for session memories and retired memories can be toggled on and off without closing the graph. The graph follows your active SillyTavern theme automatically.
 
 ---
 
