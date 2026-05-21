@@ -956,7 +956,11 @@ async function onChatChangedImpl() {
   respondedThisRound = new Set();
   selectedGroupCharacter = null;
   setContinuityBadge(null);
-  lastKnownChatLength = 0;
+  // Initialise to the current chat length so the first CHARACTER_MESSAGE_RENDERED
+  // after a chat load is not mistaken for a new message when the user swipes
+  // immediately without generating anything first. A swipe does not grow the
+  // chat array, so currentLength <= lastKnownChatLength correctly identifies it.
+  lastKnownChatLength = getContext().chat?.length ?? 0;
   clearEmbeddingCache();
   clearUnifiedSlot();
 
