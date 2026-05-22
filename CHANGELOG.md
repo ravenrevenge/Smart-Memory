@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.7] - 2026-05-22
+
+### Fixed
+
+- **Extraction no longer fires on swipes in group chats.** `GROUP_WRAPPER_FINISHED`
+  fires with `type='swipe'` when a group chat member is swiped, but the handler
+  only guarded against `'quiet'`. Every group chat swipe was incrementing the
+  extraction counter, so extraction fired every N swipes where N is the
+  extraction frequency. The fix mirrors the solo-chat swipe guard that was
+  already in place.
+
 ## [1.7.6] - 2026-05-22
 
 ### Fixed

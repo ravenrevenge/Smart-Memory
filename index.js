@@ -1289,6 +1289,10 @@ async function onGroupWrapperFinished({ type } = {}) {
   // Skipping them keeps the extraction counter and respondedThisRound in sync with
   // actual story progress rather than firing on every post-round expression classify.
   if (type === 'quiet') return;
+  // Swipes are alternative generations the user has not accepted - skip the same
+  // way solo chat does. GROUP_WRAPPER_FINISHED fires with type='swipe' for group
+  // swipes, so without this guard every swipe increments the extraction counter.
+  if (type === 'swipe') return;
   if (generationInProgress) return;
   const settings = getSettings();
   if (!settings.enabled) return;
