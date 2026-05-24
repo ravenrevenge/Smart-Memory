@@ -946,7 +946,15 @@ async function onChatChangedImpl() {
 
   // Dismiss any recap overlay from the previous chat immediately - it is modal
   // and blocks input, so leaving it up over the new chat is confusing.
-  $('#sm_recap_overlay').remove();
+  // Guard against removing a recap that was just displayed for this same chat:
+  // ST fires multiple events on load and the debounce doesn't fully collapse
+  // them, so a second onChatChangedImpl call can arrive after the recap promise
+  // resolves and wipe the overlay before the user has a chance to read it.
+  // recapRunningForChat holds the chatMetadata reference of the chat whose recap
+  // is in progress; if it matches the current chat we leave the overlay alone.
+  if (recapRunningForChat !== getContext().chatMetadata) {
+    $('#sm_recap_overlay').remove();
+  }
 
   messagesSinceLastExtraction = 0;
   messagesSinceLastProfileRegen = 0;

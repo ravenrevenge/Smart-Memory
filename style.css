@@ -1584,20 +1584,25 @@
 
 /* ── Away recap modal ──────────────────────────────────────────────────────── */
 
-/* flex-start + margin:auto on the card centers it when there is room, and lets
-   the card start at the top (with padding breathing room) when the card is tall -
-   preventing it from being pushed off the top on mobile where browser chrome
-   shrinks the visible area below 100vh. */
+/* dialog renders in the browser top layer so position:fixed is not needed -
+   it is always above any stacking context regardless of ancestor transforms. */
 #sm_recap_overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.65);
-  z-index: 10000;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  overflow-y: auto;
+  border: none;
   padding: 16px;
+  background: transparent;
+  width: 100vw;
+  max-width: 100vw;
+  height: 100vh;
+  max-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  overflow-y: auto;
+}
+
+#sm_recap_overlay::backdrop {
+  background: rgba(0, 0, 0, 0.65);
 }
 
 .sm_recap_card {
